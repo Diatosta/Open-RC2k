@@ -3,18 +3,18 @@
 version = 3
 
 [[package]]
-name = "libmem"
-version = "4.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "489f0360c148be6064bcaabe563ac8cfed26bdeae9e1e18dea85a0a5dd3e23dc"
-
-[[package]]
-name = "rc2k_hook"
+name = "RC2k-hook"
 version = "0.1.0"
 dependencies = [
  "libmem",
  "windows",
 ]
+
+[[package]]
+name = "libmem"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "489f0360c148be6064bcaabe563ac8cfed26bdeae9e1e18dea85a0a5dd3e23dc"
 
 [[package]]
 name = "windows"
