@@ -1,34 +1,22 @@
-use std::{mem, ptr, thread};
+use libmem::*;
+use std::{arch::asm, mem, thread};
 use windows::{
     core::PCSTR,
     imp::{GetProcAddress, LoadLibraryA},
-    Win32::{
-        Foundation::{BOOL, HMODULE, HWND},
-        System::LibraryLoader::GetModuleHandleA,
-        UI::WindowsAndMessaging::{MessageBoxA, MESSAGEBOX_STYLE},
-    },
+    Win32::Foundation::{BOOL, HMODULE},
 };
 
-const SUB401EDE: usize = 0x401EDE;
+// This method is used to check if the game is installed to the correct folder (among possibly other things)
+// It sets ZF to 1 if the game is installed to the correct folder, and 0 otherwise
+// As such, force ZF to 1 to skip this check
+unsafe fn sub_401ede_fn() {
+    asm!("xor eax, eax",);
+}
 
 fn inject_stuff() {
-    unsafe {
-        MessageBoxA(
-            HWND(0),
-            PCSTR("DLL Hijacked!\x00".as_ptr()),
-            PCSTR("Uh oh\x00".as_ptr()),
-            MESSAGEBOX_STYLE(0),
-        );
+    let hk_addr = sub_401ede_fn as *const () as lm_address_t;
 
-        let module_handle = GetModuleHandleA(PCSTR(ptr::null())).unwrap();
-        let handle = format!("module_handle: {:x}\x00", module_handle.0);
-        MessageBoxA(
-            HWND(0),
-            PCSTR(handle.as_ptr()),
-            PCSTR("Uh oh\x00".as_ptr()),
-            MESSAGEBOX_STYLE(0),
-        );
-    };
+    let _ = LM_HookCode(0x401EDE, hk_addr).unwrap();
 }
 
 #[no_mangle]
@@ -52,7 +40,7 @@ extern "C" fn DirectInputCreateA() -> u32 {
 extern "system" fn DllMain(_module_handle: HMODULE, dw_reason: u32, _lp_reserved: &u32) -> BOOL {
     match dw_reason {
         1u32 => {
-            std::thread::spawn(inject_stuff);
+            thread::spawn(inject_stuff);
         }
         _ => return BOOL(0),
     };
