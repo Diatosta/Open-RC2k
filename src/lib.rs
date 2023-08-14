@@ -1,19 +1,24 @@
+#![feature(naked_functions)]
+
 use libmem::*;
-use std::{arch::asm, ffi::c_char, mem, path::Path, thread};
+use std::{
+    arch::asm,
+    ffi::{c_char, CStr},
+    mem, thread,
+};
 use windows::{
     core::PCSTR,
     imp::{GetProcAddress, LoadLibraryA},
     Win32::{
-        Foundation::{BOOL, HMODULE, HWND},
+        Foundation::{GetLastError, BOOL, HMODULE},
         Storage::FileSystem::{FindFileHandle, FindFirstFileA, FindNextFileA, WIN32_FIND_DATAA},
         System::{
             Environment::GetCurrentDirectoryA,
             Registry::{
-                RegCloseKey, RegOpenKeyA, RegOpenKeyExA, RegQueryValueExA, HKEY,
-                HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_32KEY, REG_BINARY, REG_SZ, REG_VALUE_TYPE,
+                RegCloseKey, RegOpenKeyExA, RegQueryValueExA, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
+                KEY_WOW64_32KEY, REG_BINARY, REG_SZ, REG_VALUE_TYPE,
             },
         },
-        UI::WindowsAndMessaging::{MessageBoxA, MESSAGEBOX_STYLE},
     },
 };
 
@@ -24,21 +29,26 @@ unsafe fn sub_401ede_fn() {
     asm!("xor eax, eax",);
 }
 
-unsafe fn sub_4030d1_fn() {
-    let mut lpbuffer: [u8; 0xFF] = [0; 0xFF];
-    let result = GetCurrentDirectoryA(Some(&mut lpbuffer));
+// Gets the current directory
+unsafe fn maybe_get_current_directory_fn() {
+    let mut current_directory: [u8; 0xFF] = [0; 0xFF];
+    let bytes_written = GetCurrentDirectoryA(Some(&mut current_directory));
 
-    if result != 0 {
-        let path = Path::new(std::str::from_utf8_unchecked(&lpbuffer)).to_path_buf();
-        let path = if path.is_dir() { path } else { path.join("\\") };
-        let path_str = path.to_str().unwrap();
-        let path_bytes = path_str.as_bytes();
-        lpbuffer[..path_bytes.len()].copy_from_slice(path_bytes);
+    if bytes_written != 0 {
+        // Convert current_directory to a String
+        let mut current_directory_str =
+            std::str::from_utf8_unchecked(&current_directory[..bytes_written as usize]).to_string();
+
+        if !current_directory_str.ends_with('\\') && !current_directory_str.ends_with('/') {
+            current_directory_str.push('\\');
+            current_directory[..current_directory_str.len()]
+                .copy_from_slice(current_directory_str.as_bytes());
+        }
     }
 
     asm!(
         "lea edx, [{}]",
-        in(reg) &lpbuffer as *const _,
+        in(reg) &current_directory as *const _,
     );
 }
 
@@ -104,40 +114,47 @@ unsafe fn maybe_get_registry_game_status_fn() {
     (0x51BB8D as *mut u8).copy_from(registry_source.as_mut_ptr(), 0xFF);
 }
 
-unsafe fn maybe_find_file_fn() -> u32 {
-    // Set a1 to EAX
-    // Ideally this would be done with libmem, but it seems to be broken for now
-    let mut a1: i32;
-    asm!("mov {a1}, edx", a1 = out(reg) a1);
+#[naked]
+unsafe extern "C" fn maybe_find_file_parameters() {
+    // Push the parameters to the stack
+    // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
+    asm!("push edx", "push eax", "call {}", "add esp, 8", "ret", sym maybe_find_file_impl, options(noreturn));
+}
 
-    // Set 0x4F52B0 to a pointer to a1
-    // Ideally this would be done with libmem, but it seems to be broken for now
-    *(0x4F52B0 as *mut i32) = a1;
+unsafe fn maybe_find_file_impl(a1: *const u8, edx: u32) -> u32 {
+    let lp_filename = PCSTR::from_raw(a1);
 
     // Create a pointer with type WIN32_FIND_DATAA that points to 0x4E05A8
     // This is the same as the type of the second argument of FindFirstFileA
     // Ideally this would be done with libmem, but it seems to be broken for now
     let find_file_data = 0x4E05A8 as *mut WIN32_FIND_DATAA;
-    let h_find_file = FindFirstFileA(*(0x4F52B0 as *mut PCSTR), find_file_data);
+    let h_find_file = FindFirstFileA(lp_filename, find_file_data);
 
     let result: u32;
 
-    if let Ok(h_find_file_raw) = h_find_file {
-        // Copy h_find_file_raw to 0x4E05A4
-        // Ideally this would be done with libmem, but it seems to be broken for now
-        *(0x4E05A4 as *mut isize) = h_find_file_raw.0;
+    match h_find_file {
+        Ok(h_find_file_raw) => {
+            // Copy h_find_file_raw to 0x4E05A4
+            *(0x4E05A4 as *mut isize) = h_find_file_raw.0;
 
-        result = (*find_file_data).dwFileAttributes;
+            let unk_value = *(0x4E06E6 as *const u32);
 
-        if ((*find_file_data).dwFileAttributes & (*find_file_data).cAlternateFileName[14] as u32)
-            != 0
-        {
-            return maybe_find_next_file() as u32;
+            let flags = (*find_file_data).dwFileAttributes & unk_value;
+
+            if flags != 0 {
+                result = maybe_find_next_file() as u32;
+            } else {
+                result = (*find_file_data).dwFileAttributes;
+            }
         }
-    } else {
-        *(0x4E05A4 as *mut isize) = -1;
-        result = 0;
+        Err(_) => {
+            *(0x4E05A4 as *mut isize) = -1;
+            result = 0;
+        }
     }
+
+    // Restore edx
+    asm!("mov edx, {}", in(reg) edx);
 
     result
 }
@@ -145,6 +162,7 @@ unsafe fn maybe_find_file_fn() -> u32 {
 unsafe fn maybe_find_next_file() -> i32 {
     let mut result: BOOL;
     let find_file_data = 0x4E05A8 as *mut WIN32_FIND_DATAA;
+    let mut unk_value: u32;
 
     // Copy 0x4E05A4 to h_find_file_raw
     // Ideally this would be done with libmem, but it seems to be broken for now
@@ -157,9 +175,11 @@ unsafe fn maybe_find_next_file() -> i32 {
         }
         result = BOOL((*find_file_data).dwFileAttributes as i32);
 
-        if ((*find_file_data).dwFileAttributes & (*find_file_data).cAlternateFileName[14] as u32)
-            == 0
-        {
+        unk_value = *(0x4E06E6 as *const u32);
+
+        let flags = (*find_file_data).dwFileAttributes & unk_value;
+
+        if flags == 0 {
             break;
         }
     }
@@ -167,16 +187,46 @@ unsafe fn maybe_find_next_file() -> i32 {
     result.0
 }
 
+#[naked]
+unsafe extern "C" fn sub_403070_parameters() {
+    // Push the parameters to the stack
+    // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
+    asm!("push ebx", "push edx", "call {}", "mov ebx, eax", "add esp, 8", "ret", sym sub_403070, options(noreturn));
+}
+
+unsafe fn sub_403070(a1: *const c_char, a2: *mut u8) -> usize {
+    // Convert a1 pointer to a &str
+    let a1_str = CStr::from_ptr(a1).to_str();
+
+    if let Ok(a1_str) = a1_str {
+        // Copy a1 to a2 until the last occurence of a '\\', '/' or ':'
+        let temp_str = a1_str.rsplit_once(|c| c == '\\' || c == '/' || c == ':');
+
+        if let Some((temp_str, _)) = temp_str {
+            a2.copy_from(temp_str.as_ptr(), temp_str.len() + 1); // + 1 for the null terminator
+
+            // Move the end of string to buffer it was moved into as it'll be needed later
+            return a2 as usize + temp_str.len() + 1;
+        }
+    }
+
+    0
+}
+
 fn inject_stuff() {
     let sub_401ede_hk_addr = sub_401ede_fn as *const () as lm_address_t;
-    let get_registry_game_status_hk_addr = maybe_get_registry_game_status_fn as *const () as lm_address_t;
-    let sub_4030d1_hk_addr = sub_4030d1_fn as *const () as lm_address_t;
-    let maybe_find_file_hk_addr = maybe_find_file_fn as *const () as lm_address_t;
+    let maybe_get_registry_game_status_hk_addr =
+        maybe_get_registry_game_status_fn as *const () as lm_address_t;
+    let maybe_get_current_directory_hk_addr =
+        maybe_get_current_directory_fn as *const () as lm_address_t;
+    let maybe_find_file_params_hk_addr = maybe_find_file_parameters as *const () as lm_address_t;
+    let sub_403070_params_hk_addr = sub_403070_parameters as *const () as lm_address_t;
 
     //let _ = LM_HookCode(0x401EDE, sub_401ede_hk_addr).unwrap();
-    let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x4030D1, sub_4030d1_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x402FC2, maybe_find_file_hk_addr).unwrap();
+    let _ = LM_HookCode(0x413D14, maybe_get_registry_game_status_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x4030D1, maybe_get_current_directory_hk_addr).unwrap();
+    let _ = LM_HookCode(0x402FC2, maybe_find_file_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x403070, sub_403070_params_hk_addr).unwrap();
 }
 
 #[no_mangle]
