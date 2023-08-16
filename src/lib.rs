@@ -11,7 +11,7 @@ use windows::{
     imp::{GetProcAddress, LoadLibraryA},
     Win32::{
         Foundation::{GetLastError, BOOL, HMODULE},
-        Storage::FileSystem::{FindFileHandle, FindFirstFileA, FindNextFileA, WIN32_FIND_DATAA},
+        Storage::FileSystem::{FindFileHandle, FindFirstFileA, FindNextFileA, WIN32_FIND_DATAA, FILE_ATTRIBUTE_DIRECTORY},
         System::{
             Environment::GetCurrentDirectoryA,
             Registry::{
@@ -118,10 +118,14 @@ unsafe fn maybe_get_registry_game_status_fn() {
 unsafe extern "C" fn maybe_find_file_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
-    asm!("push edx", "push eax", "call {}", "add esp, 8", "ret", sym maybe_find_file_impl, options(noreturn));
+    // ECX is also needed further on, so we have to save it
+    asm!("push ecx", "push edx", "push eax", "call {}", "add esp, 8", "pop ecx", "ret", sym maybe_find_file_impl, options(noreturn));
 }
 
 unsafe fn maybe_find_file_impl(a1: *const u8, edx: u32) -> u32 {
+    // This seems to be where the current file name is stored
+    *(0x4F52B0 as *mut *const u8) = a1;
+
     let lp_filename = PCSTR::from_raw(a1);
 
     // Create a pointer with type WIN32_FIND_DATAA that points to 0x4E05A8
@@ -137,9 +141,7 @@ unsafe fn maybe_find_file_impl(a1: *const u8, edx: u32) -> u32 {
             // Copy h_find_file_raw to 0x4E05A4
             *(0x4E05A4 as *mut isize) = h_find_file_raw.0;
 
-            let unk_value = *(0x4E06E6 as *const u32);
-
-            let flags = (*find_file_data).dwFileAttributes & unk_value;
+            let flags = (*find_file_data).dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0;
 
             if flags != 0 {
                 result = maybe_find_next_file() as u32;
@@ -223,10 +225,10 @@ fn inject_stuff() {
     let sub_403070_params_hk_addr = sub_403070_parameters as *const () as lm_address_t;
 
     //let _ = LM_HookCode(0x401EDE, sub_401ede_hk_addr).unwrap();
-    let _ = LM_HookCode(0x413D14, maybe_get_registry_game_status_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x413D14, maybe_get_registry_game_status_hk_addr).unwrap();
     //let _ = LM_HookCode(0x4030D1, maybe_get_current_directory_hk_addr).unwrap();
     let _ = LM_HookCode(0x402FC2, maybe_find_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x403070, sub_403070_params_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x403070, sub_403070_params_hk_addr).unwrap();
 }
 
 #[no_mangle]
