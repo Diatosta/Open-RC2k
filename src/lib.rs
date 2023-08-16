@@ -240,10 +240,17 @@ unsafe fn maybe_read_file(
     number_of_bytes_read
 }
 
+#[naked]
+unsafe extern "C" fn maybe_find_close_parameters() {
+    // We must push and pop all registers as they are needed further on
+    asm!("pusha", "call {}", "popa", "ret", sym maybe_find_close, options(noreturn));
+}
+
 unsafe fn maybe_find_close() {
-    if H_FIND_FILE != INVALID_HANDLE_VALUE {
-        let _ = FindClose(H_FIND_FILE);
-        H_FIND_FILE = INVALID_HANDLE_VALUE;
+    let h_find_file = *(0x4E05A4 as *mut HANDLE);
+    if h_find_file != INVALID_HANDLE_VALUE {
+        let _ = FindClose(h_find_file);
+        *(0x4E05A4 as *mut HANDLE) = INVALID_HANDLE_VALUE;
     }
 }
 
@@ -258,16 +265,16 @@ fn inject_stuff() {
         maybe_get_directory_path_parameters as *const () as lm_address_t;
     let set_current_directory_hk_addr = set_current_directory as *const () as lm_address_t;
     let maybe_read_file_params_hk_addr = maybe_read_file_parameters as *const () as lm_address_t;
-    let maybe_find_close_hk_addr = maybe_find_close as *const () as lm_address_t;
+    let maybe_find_close_params_hk_addr = maybe_find_close_parameters as *const () as lm_address_t;
 
     //let _ = LM_HookCode(0x401EDE, maybe_are_strings_equal_hk_addr).unwrap();
     //let _ = LM_HookCode(0x413D14, maybe_get_registry_game_status_hk_addr).unwrap();
     //let _ = LM_HookCode(0x4030D1, maybe_get_current_directory_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402FC2, maybe_find_file_params_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x402FC2, maybe_find_file_params_hk_addr).unwrap();
     //let _ = LM_HookCode(0x403070, maybe_get_directory_path_params_hk_addr).unwrap();
     //let _ = LM_HookCode(0x403105, set_current_directory_hk_addr).unwrap();
     //let _ = LM_HookCode(0x402E3D, maybe_read_file_params_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x40301F, maybe_find_close_hk_addr).unwrap();
+    let _ = LM_HookCode(0x40301F, maybe_find_close_params_hk_addr).unwrap();
 }
 
 #[naked]
