@@ -185,7 +185,7 @@ unsafe fn maybe_find_next_file() -> i32 {
 unsafe extern "C" fn maybe_get_directory_path_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
-    asm!("push ebx", "push edx", "call {}", "mov ebx, eax", "add esp, 8", "ret", sym maybe_get_directory_path, options(noreturn));
+    asm!("push eax", "push ecx", "push ebx", "push edx", "call {}", "mov ebx, eax", "pop edx", "add esp, 4", "pop ecx", "pop eax", "ret", sym maybe_get_directory_path, options(noreturn));
 }
 
 unsafe fn maybe_get_directory_path(a1: *const c_char, a2: *mut u8) -> usize {
@@ -271,7 +271,7 @@ fn inject_stuff() {
     let _ = LM_HookCode(0x413D14, maybe_get_registry_game_status_hk_addr).unwrap();
     let _ = LM_HookCode(0x4030D1, maybe_get_current_directory_hk_addr).unwrap();
     let _ = LM_HookCode(0x402FC2, maybe_find_file_params_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x403070, maybe_get_directory_path_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x403070, maybe_get_directory_path_params_hk_addr).unwrap();
     //let _ = LM_HookCode(0x403105, set_current_directory_hk_addr).unwrap();
     //let _ = LM_HookCode(0x402E3D, maybe_read_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x40301F, maybe_find_close_params_hk_addr).unwrap();
