@@ -8,12 +8,15 @@ use std::{
 };
 use windows::{
     core::PCSTR,
-    imp::{GetProcAddress, LoadLibraryA},
     Win32::{
-        Foundation::{GetLastError, BOOL, HMODULE},
-        Storage::FileSystem::{FindFileHandle, FindFirstFileA, FindNextFileA, WIN32_FIND_DATAA, FILE_ATTRIBUTE_DIRECTORY},
+        Foundation::{GetLastError, BOOL, HANDLE, HINSTANCE, HMODULE, INVALID_HANDLE_VALUE},
+        Storage::FileSystem::{
+            FindClose, FindFirstFileA, FindNextFileA, ReadFile, FILE_ATTRIBUTE_DIRECTORY,
+            WIN32_FIND_DATAA,
+        },
         System::{
             Environment::GetCurrentDirectoryA,
+            LibraryLoader::{GetProcAddress, LoadLibraryA},
             Registry::{
                 RegCloseKey, RegOpenKeyExA, RegQueryValueExA, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
                 KEY_WOW64_32KEY, REG_BINARY, REG_SZ, REG_VALUE_TYPE,
@@ -22,15 +25,17 @@ use windows::{
     },
 };
 
+static mut H_FIND_FILE: HANDLE = INVALID_HANDLE_VALUE;
+
 // This method is used to check if the game is installed to the correct folder (among possibly other things)
 // It sets ZF to 1 if the game is installed to the correct folder, and 0 otherwise
 // As such, force ZF to 1 to skip this check
-unsafe fn sub_401ede_fn() {
+unsafe fn maybe_are_strings_equal() {
     asm!("xor eax, eax",);
 }
 
 // Gets the current directory
-unsafe fn maybe_get_current_directory_fn() {
+unsafe fn maybe_get_current_directory() {
     let mut current_directory: [u8; 0xFF] = [0; 0xFF];
     let bytes_written = GetCurrentDirectoryA(Some(&mut current_directory));
 
@@ -53,7 +58,7 @@ unsafe fn maybe_get_current_directory_fn() {
 }
 
 // Gets the status and source keys from the registry
-unsafe fn maybe_get_registry_game_status_fn() {
+unsafe fn maybe_get_registry_game_status() {
     const SOFTWARE_MAGNETIC_FIELDS: &str = "SOFTWARE\\Magnetic Fields\\RC99\x00";
     const STATUS: &str = "status\x00";
     const SOURCE: &str = "source\x00";
@@ -105,7 +110,7 @@ unsafe fn maybe_get_registry_game_status_fn() {
         }
     }
 
-    RegCloseKey(phk_result);
+    let _ = RegCloseKey(phk_result);
 
     // Set 0x51BB8C to registry_status
     *(0x51BB8C as *mut u8) = registry_status;
@@ -118,45 +123,36 @@ unsafe fn maybe_get_registry_game_status_fn() {
 unsafe extern "C" fn maybe_find_file_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
-    // ECX is also needed further on, so we have to save it
-    asm!("push ecx", "push edx", "push eax", "call {}", "add esp, 8", "pop ecx", "ret", sym maybe_find_file_impl, options(noreturn));
+    // ECX and EDX are also needed further on, so we have to save it
+    asm!("push ecx", "push edx", "push eax", "call {}", "add esp, 4", "pop edx", "pop ecx", "ret", sym maybe_find_file_impl, options(noreturn));
 }
 
-unsafe fn maybe_find_file_impl(a1: *const u8, edx: u32) -> u32 {
+unsafe fn maybe_find_file_impl(a1: *const u8) -> u32 {
     // This seems to be where the current file name is stored
     *(0x4F52B0 as *mut *const u8) = a1;
 
     let lp_filename = PCSTR::from_raw(a1);
 
+    let result: u32;
+
     // Create a pointer with type WIN32_FIND_DATAA that points to 0x4E05A8
     // This is the same as the type of the second argument of FindFirstFileA
     // Ideally this would be done with libmem, but it seems to be broken for now
     let find_file_data = 0x4E05A8 as *mut WIN32_FIND_DATAA;
-    let h_find_file = FindFirstFileA(lp_filename, find_file_data);
+    if let Ok(find_first_file_result) = FindFirstFileA(lp_filename, find_file_data) {
+        *(0x4E05A4 as *mut HANDLE) = find_first_file_result;
+        //H_FIND_FILE = find_first_file_result;
 
-    let result: u32;
-
-    match h_find_file {
-        Ok(h_find_file_raw) => {
-            // Copy h_find_file_raw to 0x4E05A4
-            *(0x4E05A4 as *mut isize) = h_find_file_raw.0;
-
-            let flags = (*find_file_data).dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0;
-
-            if flags != 0 {
-                result = maybe_find_next_file() as u32;
-            } else {
-                result = (*find_file_data).dwFileAttributes;
-            }
+        if (*find_file_data).dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0 {
+            result = maybe_find_next_file() as u32;
+        } else {
+            result = (*find_file_data).dwFileAttributes;
         }
-        Err(_) => {
-            *(0x4E05A4 as *mut isize) = -1;
-            result = 0;
-        }
+    } else {
+        *(0x4E05A4 as *mut HANDLE) = INVALID_HANDLE_VALUE;
+        //H_FIND_FILE = INVALID_HANDLE_VALUE;
+        result = 0;
     }
-
-    // Restore edx
-    asm!("mov edx, {}", in(reg) edx);
 
     result
 }
@@ -166,13 +162,9 @@ unsafe fn maybe_find_next_file() -> i32 {
     let find_file_data = 0x4E05A8 as *mut WIN32_FIND_DATAA;
     let mut unk_value: u32;
 
-    // Copy 0x4E05A4 to h_find_file_raw
-    // Ideally this would be done with libmem, but it seems to be broken for now
-    let h_find_file_raw = *(0x4E05A4 as *const FindFileHandle);
-
     loop {
-        result = FindNextFileA(h_find_file_raw, 0x4E05A8 as *mut WIN32_FIND_DATAA);
-        if !result.as_bool() {
+        if FindNextFileA(H_FIND_FILE, 0x4E05A8 as *mut WIN32_FIND_DATAA).is_err() {
+            result = BOOL(0);
             break;
         }
         result = BOOL((*find_file_data).dwFileAttributes as i32);
@@ -190,13 +182,13 @@ unsafe fn maybe_find_next_file() -> i32 {
 }
 
 #[naked]
-unsafe extern "C" fn sub_403070_parameters() {
+unsafe extern "C" fn maybe_get_directory_path_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
-    asm!("push ebx", "push edx", "call {}", "mov ebx, eax", "add esp, 8", "ret", sym sub_403070, options(noreturn));
+    asm!("push ebx", "push edx", "call {}", "mov ebx, eax", "add esp, 8", "ret", sym maybe_get_directory_path, options(noreturn));
 }
 
-unsafe fn sub_403070(a1: *const c_char, a2: *mut u8) -> usize {
+unsafe fn maybe_get_directory_path(a1: *const c_char, a2: *mut u8) -> usize {
     // Convert a1 pointer to a &str
     let a1_str = CStr::from_ptr(a1).to_str();
 
@@ -215,36 +207,97 @@ unsafe fn sub_403070(a1: *const c_char, a2: *mut u8) -> usize {
     0
 }
 
-fn inject_stuff() {
-    let sub_401ede_hk_addr = sub_401ede_fn as *const () as lm_address_t;
-    let maybe_get_registry_game_status_hk_addr =
-        maybe_get_registry_game_status_fn as *const () as lm_address_t;
-    let maybe_get_current_directory_hk_addr =
-        maybe_get_current_directory_fn as *const () as lm_address_t;
-    let maybe_find_file_params_hk_addr = maybe_find_file_parameters as *const () as lm_address_t;
-    let sub_403070_params_hk_addr = sub_403070_parameters as *const () as lm_address_t;
+unsafe fn set_current_directory(_new_directory: PCSTR) {
+    // Ignore this for now, we want to keep the current directory
+    //SetCurrentDirectoryA(new_directory);
+}
 
-    //let _ = LM_HookCode(0x401EDE, sub_401ede_hk_addr).unwrap();
+#[naked]
+unsafe extern "C" fn maybe_read_file_parameters() {
+    // Push the parameters to the stack
+    // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
+    // We must also restore ECX and EDX as they are needed further on
+    asm!("push edx", "push ebx", "push eax", "push ecx", "call {}", "pop ecx", "add esp, 8", "pop edx", "ret", sym maybe_read_file, options(noreturn));
+}
+
+// We have to set file_buffer to a fixed size, otherwise we'll get a ERROR_NOACCESS from ReadFile
+unsafe fn maybe_read_file(
+    _number_of_bytes_to_read: *mut u32,
+    h_file: HANDLE,
+    file_buffer: &mut [u8; 0xFFFF],
+) -> u32 {
+    let mut number_of_bytes_read: u32 = 0;
+    let _ = ReadFile(
+        h_file,
+        Some(file_buffer),
+        Some(&mut number_of_bytes_read as *mut u32),
+        None,
+    );
+
+    let last_error = GetLastError();
+    println!("ReadFile failed with error code {:?}", last_error);
+
+    number_of_bytes_read
+}
+
+unsafe fn maybe_find_close() {
+    if H_FIND_FILE != INVALID_HANDLE_VALUE {
+        let _ = FindClose(H_FIND_FILE);
+        H_FIND_FILE = INVALID_HANDLE_VALUE;
+    }
+}
+
+fn inject_stuff() {
+    let maybe_are_strings_equal_hk_addr = maybe_are_strings_equal as *const () as lm_address_t;
+    let maybe_get_registry_game_status_hk_addr =
+        maybe_get_registry_game_status as *const () as lm_address_t;
+    let maybe_get_current_directory_hk_addr =
+        maybe_get_current_directory as *const () as lm_address_t;
+    let maybe_find_file_params_hk_addr = maybe_find_file_parameters as *const () as lm_address_t;
+    let maybe_get_directory_path_params_hk_addr =
+        maybe_get_directory_path_parameters as *const () as lm_address_t;
+    let set_current_directory_hk_addr = set_current_directory as *const () as lm_address_t;
+    let maybe_read_file_params_hk_addr = maybe_read_file_parameters as *const () as lm_address_t;
+    let maybe_find_close_hk_addr = maybe_find_close as *const () as lm_address_t;
+
+    //let _ = LM_HookCode(0x401EDE, maybe_are_strings_equal_hk_addr).unwrap();
     //let _ = LM_HookCode(0x413D14, maybe_get_registry_game_status_hk_addr).unwrap();
     //let _ = LM_HookCode(0x4030D1, maybe_get_current_directory_hk_addr).unwrap();
     let _ = LM_HookCode(0x402FC2, maybe_find_file_params_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x403070, sub_403070_params_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x403070, maybe_get_directory_path_params_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x403105, set_current_directory_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x402E3D, maybe_read_file_params_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x40301F, maybe_find_close_hk_addr).unwrap();
 }
 
+#[naked]
 #[no_mangle]
-extern "C" fn DirectInputCreateA() -> u32 {
-    unsafe {
-        let original_dll = LoadLibraryA(PCSTR("C:\\WINDOWS\\SysWOW64\\DINPUT.dll\x00".as_ptr()));
-        if original_dll == 0 {
-            return 0;
-        }
+unsafe extern "C" fn DirectInputCreateA() -> u32 {
+    // We have to fix the stack manually, as the generated function seems to screw it up
+    asm!("call {}", "add esp, 20", "push [esp - 20]", "ret", sym direct_input_create_a_impl, options(noreturn));
+}
 
-        let original_function: extern "C" fn() -> u32 = mem::transmute(GetProcAddress(
-            original_dll,
-            PCSTR("DirectInputCreateA\x00".as_ptr()),
-        ));
+unsafe fn direct_input_create_a_impl(
+    _: usize,
+    h_instance: usize,
+    dw_version: usize,
+    pp_direct_input_a: usize,
+    p_unk_outer: usize,
+) -> u32 {
+    if let Ok(original_dll) = LoadLibraryA(PCSTR("C:\\WINDOWS\\SysWOW64\\DINPUT.dll\x00".as_ptr()))
+    {
+        let original_function: extern "C" fn(usize, usize, usize, usize) -> u32 = mem::transmute(
+            GetProcAddress(original_dll, PCSTR("DirectInputCreateA\x00".as_ptr())),
+        );
 
-        original_function()
+        // Pass the opposite way, as for some reason it gets switched
+        let result = original_function(h_instance, dw_version, pp_direct_input_a, p_unk_outer);
+
+        asm!("sub esp, 16");
+
+        result
+    } else {
+        0
     }
 }
 
