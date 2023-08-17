@@ -222,20 +222,27 @@ unsafe extern "C" fn maybe_read_file_parameters() {
 
 // We have to set file_buffer to a fixed size, otherwise we'll get a ERROR_NOACCESS from ReadFile
 unsafe fn maybe_read_file(
-    _number_of_bytes_to_read: *mut u32,
+    number_of_bytes_to_read: *mut u32,
     h_file: HANDLE,
-    file_buffer: &mut [u8; 0xFFFF],
+    file_buffer: &mut [u8],
 ) -> u32 {
     let mut number_of_bytes_read: u32 = 0;
-    let _ = ReadFile(
+    let mut temp_buffer = vec![0u8; number_of_bytes_to_read as usize];
+
+    if ReadFile(
         h_file,
-        Some(file_buffer),
+        Some(&mut temp_buffer),
         Some(&mut number_of_bytes_read as *mut u32),
         None,
-    );
-
-    let last_error = GetLastError();
-    println!("ReadFile failed with error code {:?}", last_error);
+    )
+    .is_ok()
+    {
+        // Copy byte by byte to the original buffer using the pointer
+        // There are probably better ways to do this, but I can't find one to copy a vector to an array
+        (0..number_of_bytes_read as usize).for_each(|i| {
+            *(file_buffer.as_mut_ptr().add(i)) = temp_buffer[i];
+        });
+    }
 
     number_of_bytes_read
 }
@@ -272,8 +279,8 @@ fn inject_stuff() {
     let _ = LM_HookCode(0x4030D1, maybe_get_current_directory_hk_addr).unwrap();
     let _ = LM_HookCode(0x402FC2, maybe_find_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x403070, maybe_get_directory_path_params_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x403105, set_current_directory_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x402E3D, maybe_read_file_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x403105, set_current_directory_hk_addr).unwrap();
+    let _ = LM_HookCode(0x402E3D, maybe_read_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x40301F, maybe_find_close_params_hk_addr).unwrap();
 }
 
