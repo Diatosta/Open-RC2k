@@ -14,7 +14,7 @@ unsafe extern "C" fn build_file_pattern_parameters() {
     asm!("push ecx", "push edx", "push esi", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "ret", sym build_file_pattern, options(noreturn));
 }
 
-unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
+pub unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
     let first_dword = std::str::from_utf8(&*(string as *mut [u8; 4]));
     let first_word = std::str::from_utf8(&*(string as *mut [u8; 2]));
     let first_char = std::str::from_utf8(&*(string as *mut [u8; 1]));

@@ -8,8 +8,8 @@ use windows::{
     Win32::{
         Foundation::{BOOL, HANDLE, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
-            FindClose, FindFirstFileA, FindNextFileA, ReadFile, FILE_ATTRIBUTE_DIRECTORY,
-            WIN32_FIND_DATAA,
+            CreateFileA, FindClose, FindFirstFileA, FindNextFileA, ReadFile,
+            FILE_ATTRIBUTE_DIRECTORY, WIN32_FIND_DATAA, FILE_SHARE_MODE, FILE_CREATION_DISPOSITION, FILE_ATTRIBUTE_NORMAL,
         },
         System::{
             Environment::GetCurrentDirectoryA,
@@ -21,12 +21,13 @@ use windows::{
     },
 };
 
+use crate::utils::file;
+
 static mut H_FIND_FILE: HANDLE = INVALID_HANDLE_VALUE;
 
 pub fn inject_hooks() {
     let are_strings_equal_hk_addr = are_strings_equal as *const () as lm_address_t;
-    let get_registry_game_status_hk_addr =
-        get_registry_game_status as *const () as lm_address_t;
+    let get_registry_game_status_hk_addr = get_registry_game_status as *const () as lm_address_t;
     let get_current_directory_params_hk_addr =
         get_current_directory_parameters as *const () as lm_address_t;
     let find_file_params_hk_addr = find_file_parameters as *const () as lm_address_t;
@@ -37,6 +38,8 @@ pub fn inject_hooks() {
     let find_close_params_hk_addr = find_close_parameters as *const () as lm_address_t;
     let is_game_installed_in_current_directory_params_hk_addr =
         is_game_installed_in_current_directory_parameters as *const () as lm_address_t;
+    let open_or_create_file_params_hk_addr =
+        open_or_create_file_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x401EDE, are_strings_equal_hk_addr).unwrap();
     let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
@@ -51,6 +54,7 @@ pub fn inject_hooks() {
         is_game_installed_in_current_directory_params_hk_addr,
     )
     .unwrap();
+    let _ = LM_HookCode(0x402DE8, open_or_create_file_params_hk_addr).unwrap();
 }
 
 #[naked]
@@ -292,6 +296,8 @@ unsafe fn read_file(
         (0..number_of_bytes_read as usize).for_each(|i| {
             *(file_buffer.as_mut_ptr().add(i)) = temp_buffer[i];
         });
+
+        asm!("cmp eax, eax"); // Force ZF to 1
     }
 
     number_of_bytes_read
@@ -308,5 +314,42 @@ unsafe fn find_close() {
     if h_find_file != INVALID_HANDLE_VALUE {
         let _ = FindClose(h_find_file);
         *(0x4E05A4 as *mut HANDLE) = INVALID_HANDLE_VALUE;
+    }
+}
+
+#[naked]
+unsafe extern "C" fn open_or_create_file_parameters() {
+    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file, options(noreturn));
+}
+
+unsafe fn open_or_create_file(a1: *mut u8, a2: u32) -> HANDLE {
+    // TODO: Replace this by a global to current_file_pattern
+    let current_file_pattern = file::build_file_pattern(a1);
+
+    *(0x4F52B0 as *mut *mut u8) = current_file_pattern;
+
+    let current_file_pattern_pcstr = PCSTR::from_raw(current_file_pattern);
+
+    let dw_desired_access = *((0x4E06EA as *mut u32).add(4 * a2 as usize));
+    let dw_share_mode = *((0x4E06F2 as *mut u32).add(4 * a2 as usize));
+    let dw_creation_disposition = *((0x4E06EE as *mut u32).add(4 * a2 as usize));
+
+    let file_handle = CreateFileA(
+        current_file_pattern_pcstr,
+        dw_desired_access,
+        FILE_SHARE_MODE(dw_share_mode),
+        None,
+        FILE_CREATION_DISPOSITION(dw_creation_disposition),
+        FILE_ATTRIBUTE_NORMAL,
+        None,
+    );
+
+    if let Ok(file_handle) = file_handle {
+        asm!("cmp {}, 1", in(reg) file_handle.0 + 1);
+        file_handle
+    } else {
+        // TODO: Eventually remove this, as only the returned value will be used
+        asm!("test eax, eax"); // Force ZF to 0
+        INVALID_HANDLE_VALUE
     }
 }
