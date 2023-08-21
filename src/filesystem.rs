@@ -62,8 +62,8 @@ pub fn inject_hooks() {
     let _ = LM_HookCode(0x402DE8, open_or_create_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402E75, set_file_pointer_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x403206, build_file_pattern_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402E57, write_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x402E57, write_file_params_hk_addr).unwrap();
+    //let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
 }
 
 #[naked]
@@ -272,26 +272,25 @@ unsafe extern "C" fn read_file_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
     // We must also restore ECX and EDX as they are needed further on
-    asm!("push edx", "push ebx", "push eax", "push ecx", "call {}", "pop ecx", "add esp, 8", "pop edx", "ret", sym read_file, options(noreturn));
+    asm!("push edx", "push ebx", "push eax", "push ecx", "call {}", "pop ecx", "add esp, 8", "cmp edx, 1", "pop edx", "ret", sym read_file, options(noreturn));
 }
 
-// TODO: Figure out why the map doesn't load properly
-// This seems to be the culprit
 unsafe fn read_file(
     number_of_bytes_to_read: *mut u32,
     h_file: HANDLE,
     file_buffer: &mut [u8],
-) -> u32 {
+) -> (u32, u32) {
     let mut number_of_bytes_read: u32 = 0;
     let mut temp_buffer = vec![0u8; number_of_bytes_to_read as usize];
 
-    if ReadFile(
+    let result =  ReadFile(
         h_file,
         Some(&mut temp_buffer),
         Some(&mut number_of_bytes_read as *mut u32),
         None,
-    )
-    .is_ok()
+    );
+
+    if result.is_ok()
     {
         // Copy byte by byte to the original buffer using the pointer
         // There are probably better ways to do this, but I can't find one to copy a vector to an array
@@ -302,7 +301,7 @@ unsafe fn read_file(
         asm!("cmp eax, eax"); // Force ZF to 1
     }
 
-    number_of_bytes_read
+    (number_of_bytes_read, result.is_ok() as u32)
 }
 
 #[naked]
