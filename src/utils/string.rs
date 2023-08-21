@@ -2,12 +2,14 @@ use libmem::*;
 use std::arch::asm;
 
 pub fn inject_hooks() {
+    let are_strings_equal_hk_addr = are_strings_equal as *const () as lm_address_t;
     let insert_new_line_params_hk_addr = insert_new_line_parameters as *const () as lm_address_t;
     let insert_space_params_hk_addr = insert_space_parameters as *const () as lm_address_t;
     let insert_tab_params_hk_addr = insert_tab_parameters as *const () as lm_address_t;
     let insert_colon_params_hk_addr = insert_colon_parameters as *const () as lm_address_t;
     let append_params_hk_addr = append_parameters as *const () as lm_address_t;
 
+    let _ = LM_HookCode(0x401EDE, are_strings_equal_hk_addr).unwrap();
     let _ = LM_HookCode(0x401F20, insert_new_line_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x401F29, insert_space_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x401F2E, insert_tab_params_hk_addr).unwrap();
@@ -90,4 +92,11 @@ unsafe fn insert_colon(string: *mut u8) {
 
     // Move pointer 1 forward so we don't overwrite later
     asm!("add ebx, 1");
+}
+
+// This method is used to check if the game is installed to the correct folder (among possibly other things)
+// It sets ZF to 1 if the game is installed to the correct folder, and 0 otherwise
+// As such, force ZF to 1 to skip this check
+pub unsafe fn are_strings_equal() {
+    asm!("xor eax, eax",);
 }

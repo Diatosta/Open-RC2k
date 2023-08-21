@@ -8,8 +8,9 @@ use windows::{
     Win32::{
         Foundation::{BOOL, HANDLE, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
-            CreateFileA, FindClose, FindFirstFileA, FindNextFileA, ReadFile,
-            FILE_ATTRIBUTE_DIRECTORY, WIN32_FIND_DATAA, FILE_SHARE_MODE, FILE_CREATION_DISPOSITION, FILE_ATTRIBUTE_NORMAL,
+            CreateFileA, FindClose, FindFirstFileA, FindNextFileA, ReadFile, SetFilePointer,
+            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_CREATION_DISPOSITION,
+            FILE_SHARE_MODE, SET_FILE_POINTER_MOVE_METHOD, WIN32_FIND_DATAA,
         },
         System::{
             Environment::GetCurrentDirectoryA,
@@ -21,12 +22,12 @@ use windows::{
     },
 };
 
-use crate::utils::file;
+use crate::utils::string;
+use crate::utils::thread;
 
 static mut H_FIND_FILE: HANDLE = INVALID_HANDLE_VALUE;
 
 pub fn inject_hooks() {
-    let are_strings_equal_hk_addr = are_strings_equal as *const () as lm_address_t;
     let get_registry_game_status_hk_addr = get_registry_game_status as *const () as lm_address_t;
     let get_current_directory_params_hk_addr =
         get_current_directory_parameters as *const () as lm_address_t;
@@ -40,8 +41,10 @@ pub fn inject_hooks() {
         is_game_installed_in_current_directory_parameters as *const () as lm_address_t;
     let open_or_create_file_params_hk_addr =
         open_or_create_file_parameters as *const () as lm_address_t;
+    let set_file_pointer_params_hk_addr = set_file_pointer_parameters as *const () as lm_address_t;
+    let build_file_pattern_params_hk_addr =
+        build_file_pattern_parameters as *const () as lm_address_t;
 
-    let _ = LM_HookCode(0x401EDE, are_strings_equal_hk_addr).unwrap();
     let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
     let _ = LM_HookCode(0x4030D1, get_current_directory_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402FC2, find_file_params_hk_addr).unwrap();
@@ -55,6 +58,8 @@ pub fn inject_hooks() {
     )
     .unwrap();
     let _ = LM_HookCode(0x402DE8, open_or_create_file_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x402E75, set_file_pointer_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x403206, build_file_pattern_params_hk_addr).unwrap();
 }
 
 #[naked]
@@ -74,14 +79,7 @@ unsafe fn is_game_installed_in_current_directory() {
 
     get_current_directory(&mut *game_path);
 
-    are_strings_equal();
-}
-
-// This method is used to check if the game is installed to the correct folder (among possibly other things)
-// It sets ZF to 1 if the game is installed to the correct folder, and 0 otherwise
-// As such, force ZF to 1 to skip this check
-unsafe fn are_strings_equal() {
-    asm!("xor eax, eax",);
+    string::are_strings_equal();
 }
 
 #[naked]
@@ -319,12 +317,12 @@ unsafe fn find_close() {
 
 #[naked]
 unsafe extern "C" fn open_or_create_file_parameters() {
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file, options(noreturn));
+    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "lea ebx, [eax + 1]", "cmp ebx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file, options(noreturn));
 }
 
 unsafe fn open_or_create_file(a1: *mut u8, a2: u32) -> HANDLE {
     // TODO: Replace this by a global to current_file_pattern
-    let current_file_pattern = file::build_file_pattern(a1);
+    let current_file_pattern = build_file_pattern(a1);
 
     *(0x4F52B0 as *mut *mut u8) = current_file_pattern;
 
@@ -345,11 +343,101 @@ unsafe fn open_or_create_file(a1: *mut u8, a2: u32) -> HANDLE {
     );
 
     if let Ok(file_handle) = file_handle {
-        asm!("cmp {}, 1", in(reg) file_handle.0 + 1);
         file_handle
     } else {
-        // TODO: Eventually remove this, as only the returned value will be used
-        asm!("test eax, eax"); // Force ZF to 0
         INVALID_HANDLE_VALUE
     }
+}
+
+#[naked]
+unsafe extern "C" fn set_file_pointer_parameters() {
+    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "pop edx", "pop ecx", "pop ebx", "ret", sym set_file_pointer, options(noreturn));
+}
+
+unsafe fn set_file_pointer(distance_to_move: i32, file_handle: HANDLE, dw_move_method: u32) -> u32 {
+    let result = SetFilePointer(
+        file_handle,
+        distance_to_move,
+        None,
+        SET_FILE_POINTER_MOVE_METHOD(dw_move_method),
+    );
+
+    asm!("cmp {}, 1", in(reg) result + 1);
+
+    result
+}
+
+#[naked]
+unsafe extern "C" fn build_file_pattern_parameters() {
+    asm!("push ecx", "push edx", "push esi", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "ret", sym build_file_pattern, options(noreturn));
+}
+
+unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
+    let first_dword = std::str::from_utf8(&*(string as *mut [u8; 4]));
+    let first_word = std::str::from_utf8(&*(string as *mut [u8; 2]));
+    let first_char = std::str::from_utf8(&*(string as *mut [u8; 1]));
+    let second_char = std::str::from_utf8(&*(string.add(1) as *mut [u8; 1]));
+    let unk_byte = *(0x5189A4 as *mut u8);
+
+    if let (Ok(first_dword), Ok(first_word), Ok(first_char), Ok(second_char)) =
+        (first_dword, first_word, first_char, second_char)
+    {
+        if first_dword.eq("var\\") || first_dword.eq("save") || second_char.eq(":") {
+            return string;
+        }
+
+        let mut edx: *mut u8;
+        let mut eax = string;
+
+        if !first_word.eq(";4") && unk_byte <= 3 && !first_word.eq(";3") && unk_byte >= 2 {
+            edx = 0x5295B4 as *mut u8;
+        } else {
+            edx = 0x5189A8 as *mut u8;
+        }
+
+        if first_char.eq(";") {
+            eax = eax.add(2);
+        }
+
+        (eax, edx) = (edx, eax);
+
+        let mut file_pattern_buffer = 0x94E9B0 as *mut u8;
+
+        let thread_offset = thread::get_thread_offset();
+        if thread_offset != 0 {
+            file_pattern_buffer = (thread_offset + 16) as *mut u8;
+        }
+
+        let file_pattern_buffer_start = file_pattern_buffer;
+
+        string::append(file_pattern_buffer, eax);
+
+        loop {
+            let mut current_char: u8;
+
+            loop {
+                current_char = *edx;
+                edx = edx.add(1);
+
+                if current_char != 0x25
+                /* '%' */
+                {
+                    break;
+                }
+
+                string::append(file_pattern_buffer, 0x518AA8 as *mut u8);
+            }
+
+            *file_pattern_buffer = current_char;
+            file_pattern_buffer = file_pattern_buffer.add(1);
+
+            if current_char == 0 {
+                break;
+            }
+        }
+
+        return file_pattern_buffer_start;
+    }
+
+    string
 }
