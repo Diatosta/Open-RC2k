@@ -1,6 +1,8 @@
 #![feature(naked_functions)]
 
 mod filesystem;
+mod logging;
+mod utils;
 
 use std::{arch::asm, mem, thread};
 
@@ -8,6 +10,8 @@ use windows::{Win32::{System::LibraryLoader::{LoadLibraryA, GetProcAddress}, Fou
 
 pub fn inject_hooks() {
     filesystem::inject_hooks();
+    logging::inject_hooks();
+    utils::inject_hooks();
 }
 
 #[naked]
