@@ -1,15 +1,15 @@
 use libmem::*;
 use std::{
     arch::asm,
-    ffi::{c_char, CStr},
+    ffi::{c_char, CStr, c_void},
 };
 use windows::{
     core::PCSTR,
     Win32::{
-        Foundation::{BOOL, HANDLE, INVALID_HANDLE_VALUE, CloseHandle},
+        Foundation::{CloseHandle, BOOL, HANDLE, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
-            CreateFileA, FindClose, FindFirstFileA, FindNextFileA, ReadFile, SetFilePointer,
-            WriteFile, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_CREATION_DISPOSITION,
+            CreateFileA, FindClose, FindFirstFileA, FindNextFileA, SetFilePointer,
+            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_CREATION_DISPOSITION,
             FILE_SHARE_MODE, SET_FILE_POINTER_MOVE_METHOD, WIN32_FIND_DATAA,
         },
         System::{
@@ -21,6 +21,7 @@ use windows::{
         },
     },
 };
+use windows_sys::Win32::Storage::FileSystem::{WriteFile, ReadFile};
 
 use crate::utils::string;
 use crate::utils::thread;
@@ -62,8 +63,8 @@ pub fn inject_hooks() {
     let _ = LM_HookCode(0x402DE8, open_or_create_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402E75, set_file_pointer_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x403206, build_file_pattern_params_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x402E57, write_file_params_hk_addr).unwrap();
-    //let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x402E57, write_file_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
 }
 
 #[naked]
@@ -276,32 +277,21 @@ unsafe extern "C" fn read_file_parameters() {
 }
 
 unsafe fn read_file(
-    number_of_bytes_to_read: *mut u32,
+    number_of_bytes_to_read: u32,
     h_file: HANDLE,
-    file_buffer: &mut [u8],
+    file_buffer: *mut c_void,
 ) -> (u32, u32) {
     let mut number_of_bytes_read: u32 = 0;
-    let mut temp_buffer = vec![0u8; number_of_bytes_to_read as usize];
 
-    let result =  ReadFile(
-        h_file,
-        Some(&mut temp_buffer),
-        Some(&mut number_of_bytes_read as *mut u32),
-        None,
+    let result = ReadFile(
+        h_file.0,
+        file_buffer,
+        number_of_bytes_to_read,
+        &mut number_of_bytes_read as *mut u32,
+        std::ptr::null_mut(),
     );
 
-    if result.is_ok()
-    {
-        // Copy byte by byte to the original buffer using the pointer
-        // There are probably better ways to do this, but I can't find one to copy a vector to an array
-        (0..number_of_bytes_read as usize).for_each(|i| {
-            *(file_buffer.as_mut_ptr().add(i)) = temp_buffer[i];
-        });
-
-        asm!("cmp eax, eax"); // Force ZF to 1
-    }
-
-    (number_of_bytes_read, result.is_ok() as u32)
+    (number_of_bytes_read, result as u32)
 }
 
 #[naked]
@@ -311,22 +301,22 @@ unsafe extern "C" fn write_file_parameters() {
 }
 
 // TODO: This method should return a Result, not a u32
-unsafe fn write_file(number_of_bytes_to_write: u32, file_handle: HANDLE, file_buffer: &mut [u8]) -> (u32, u32) {
+unsafe fn write_file(
+    number_of_bytes_to_write: u32,
+    file_handle: HANDLE,
+    file_buffer: *const u8,
+) -> (u32, u32) {
     let mut number_of_bytes_written: u32 = 0;
-    let mut temp_buffer = vec![0u8; number_of_bytes_to_write as usize];
-
-    (0..number_of_bytes_to_write as usize).for_each(|i| {
-        temp_buffer[i] = file_buffer[i];
-    });
 
     let result = WriteFile(
-        file_handle,
-        Some(&mut temp_buffer as &mut [u8]),
-        Some(&mut number_of_bytes_written as *mut u32),
-        None,
+        file_handle.0,
+        file_buffer,
+        number_of_bytes_to_write,
+        &mut number_of_bytes_written as *mut u32,
+        std::ptr::null_mut(),
     );
 
-    (number_of_bytes_written, result.is_ok() as u32)
+    (number_of_bytes_written, result as u32)
 }
 
 #[naked]
@@ -351,7 +341,7 @@ unsafe extern "C" fn close_file_parameters() {
 
 unsafe fn close_file(file_handle: HANDLE) -> u32 {
     *(0x4F52B0 as *mut HANDLE) = HANDLE::default();
-    
+
     let result = CloseHandle(file_handle);
 
     result.is_ok() as u32

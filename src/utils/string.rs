@@ -19,10 +19,9 @@ pub fn inject_hooks() {
 
 #[naked]
 unsafe extern "C" fn append_parameters() {
-    asm!("push edx", "push eax", "push ebx", "call {}", "mov ebx, eax", "add esp, 4", "pop eax", "pop edx", "ret", sym append, options(noreturn));
+    asm!("push ecx", "push edx", "push eax", "push ebx", "call {}", "mov ebx, eax", "add esp, 4", "pop eax", "pop edx", "pop ecx", "ret", sym append, options(noreturn));
 }
 
-// TODO: Seems to have a bug where the main menu text is not displayed???
 pub unsafe fn append(mut destination: *mut u8, mut source: *mut u8) -> *mut u8 {
     // TODO: Replace this by a more idiomatic way
     // For now we'll have to deal with raw pointers
