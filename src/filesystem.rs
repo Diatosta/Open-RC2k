@@ -301,7 +301,7 @@ unsafe extern "C" fn write_file_parameters() {
 }
 
 // TODO: This method should return a Result, not a u32
-unsafe fn write_file(
+pub unsafe fn write_file(
     number_of_bytes_to_write: u32,
     file_handle: HANDLE,
     file_buffer: *const u8,
@@ -339,7 +339,7 @@ unsafe extern "C" fn close_file_parameters() {
     asm!("push ebx", "push ecx", "push edx", "push eax", "call {}", "add esp, 4", "cmp eax, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym close_file, options(noreturn));
 }
 
-unsafe fn close_file(file_handle: HANDLE) -> u32 {
+pub unsafe fn close_file(file_handle: HANDLE) -> u32 {
     *(0x4F52B0 as *mut HANDLE) = HANDLE::default();
 
     let result = CloseHandle(file_handle);
@@ -352,7 +352,7 @@ unsafe extern "C" fn open_or_create_file_parameters() {
     asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "lea ebx, [eax + 1]", "cmp ebx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file, options(noreturn));
 }
 
-unsafe fn open_or_create_file(a1: *mut u8, a2: u32) -> HANDLE {
+pub unsafe fn open_or_create_file(a1: *mut u8, a2: u32) -> HANDLE {
     // TODO: Replace this by a global to current_file_pattern
     let current_file_pattern = build_file_pattern(a1);
 
@@ -383,20 +383,17 @@ unsafe fn open_or_create_file(a1: *mut u8, a2: u32) -> HANDLE {
 
 #[naked]
 unsafe extern "C" fn set_file_pointer_parameters() {
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "pop edx", "pop ecx", "pop ebx", "ret", sym set_file_pointer, options(noreturn));
+    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "lea edx, [eax + 1]", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym set_file_pointer, options(noreturn));
 }
 
-unsafe fn set_file_pointer(distance_to_move: i32, file_handle: HANDLE, dw_move_method: u32) -> u32 {
-    let result = SetFilePointer(
+// TODO: Should return a Result, not a u32
+pub unsafe fn set_file_pointer(distance_to_move: i32, file_handle: HANDLE, dw_move_method: SET_FILE_POINTER_MOVE_METHOD) -> u32 {
+    SetFilePointer(
         file_handle,
         distance_to_move,
         None,
-        SET_FILE_POINTER_MOVE_METHOD(dw_move_method),
-    );
-
-    asm!("cmp {}, 1", in(reg) result + 1);
-
-    result
+        dw_move_method,
+    )
 }
 
 #[naked]
