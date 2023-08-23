@@ -21,7 +21,7 @@ use windows::{
         },
     },
 };
-use windows_sys::Win32::Storage::FileSystem::{WriteFile, ReadFile};
+use windows_sys::Win32::Storage::FileSystem::ReadFile;
 
 use crate::utils::string;
 use crate::utils::thread;
@@ -297,18 +297,18 @@ unsafe fn read_file(
 #[naked]
 unsafe extern "C" fn write_file_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym write_file, options(noreturn));
+    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym write_file_hooked, options(noreturn));
 }
 
-// TODO: This method should return a Result, not a u32
-pub unsafe fn write_file(
+// TODO: This method should be removed when all hooks are implemented, using the one below instead
+unsafe fn write_file_hooked(
     number_of_bytes_to_write: u32,
     file_handle: HANDLE,
     file_buffer: *const u8,
 ) -> (u32, u32) {
     let mut number_of_bytes_written: u32 = 0;
 
-    let result = WriteFile(
+    let result = windows_sys::Win32::Storage::FileSystem::WriteFile(
         file_handle.0,
         file_buffer,
         number_of_bytes_to_write,
@@ -317,6 +317,22 @@ pub unsafe fn write_file(
     );
 
     (number_of_bytes_written, result as u32)
+}
+
+pub unsafe fn write_file(
+    file_handle: HANDLE,
+    file_buffer: PCSTR,
+) -> Result<u32, windows::core::Error> {
+    let mut number_of_bytes_written: u32 = 0;
+
+    windows::Win32::Storage::FileSystem::WriteFile(
+        file_handle,
+        Some(file_buffer.as_bytes()),
+        Some(&mut number_of_bytes_written as *mut u32),
+        Some(std::ptr::null_mut()),
+    )?;
+
+    Ok(number_of_bytes_written)
 }
 
 #[naked]

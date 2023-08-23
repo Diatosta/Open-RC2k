@@ -43,28 +43,42 @@ pub unsafe fn append(mut destination: *mut u8, mut source: *mut u8) -> *mut u8 {
 
 #[naked]
 unsafe extern "C" fn insert_new_line_parameters() {
-    asm!("push ebx", "call {}", "add esp, 4", "ret", sym insert_new_line, options(noreturn));
+    asm!("push ebx", "call {}", "add esp, 4", "ret", sym insert_new_line_hooked, options(noreturn));
 }
 
 // This method supposes the passed pointer points to the end of the string
-unsafe fn insert_new_line(string: *mut u16) {
+// TODO: Replace this by method below when all calls to it are replaced
+unsafe fn insert_new_line_hooked(string: *mut u16) {
     *string = 0xA0D; // \n\r
 
     // Move pointer 2 forward so we don't overwrite later
     asm!("add ebx, 2");
 }
 
+pub unsafe fn insert_new_line(string: &mut String) {
+    string.push_str("\r\n");
+}
+
 #[naked]
 unsafe extern "C" fn insert_space_parameters() {
-    asm!("push ebx", "call {}", "add esp, 4", "ret", sym insert_space, options(noreturn));
+    asm!("push ebx", "call {}", "add esp, 4", "ret", sym insert_space_hooked, options(noreturn));
 }
 
 // This method supposes the passed pointer points to the end of the string
-unsafe fn insert_space(string: *mut u8) {
+// TODO: Replace this by method below when all calls to it are replaced
+unsafe fn insert_space_hooked(string: *mut u8) {
     *string = 0x20; // Space
 
     // Move pointer 1 forward so we don't overwrite later
     asm!("add ebx, 1");
+}
+
+pub unsafe fn insert_space(string: &mut String) {
+    string.push(' ');
+}
+
+pub unsafe fn insert_null_terminator(string: &mut String) {
+    string.push('\0');
 }
 
 #[naked]

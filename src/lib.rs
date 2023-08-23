@@ -6,7 +6,16 @@ mod utils;
 
 use std::{arch::asm, mem, thread};
 
-use windows::{Win32::{System::LibraryLoader::{LoadLibraryA, GetProcAddress}, Foundation::{HMODULE, BOOL}}, core::PCSTR};
+use windows::{
+    core::PCSTR,
+    Win32::{
+        Foundation::{BOOL, HMODULE},
+        System::{
+            Console::AllocConsole,
+            LibraryLoader::{GetProcAddress, LoadLibraryA},
+        },
+    },
+};
 
 pub fn inject_hooks() {
     filesystem::inject_hooks();
@@ -50,6 +59,9 @@ extern "system" fn DllMain(_module_handle: HMODULE, dw_reason: u32, _lp_reserved
     match dw_reason {
         1u32 => {
             thread::spawn(inject_hooks);
+            unsafe {
+                let _ = AllocConsole();
+            }
         }
         _ => return BOOL(0),
     };
