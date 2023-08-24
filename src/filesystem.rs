@@ -455,7 +455,7 @@ unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
 
         let file_pattern_buffer_start = file_pattern_buffer;
 
-        string::append(file_pattern_buffer, eax);
+        string::append_hooked(file_pattern_buffer, eax);
 
         loop {
             let mut current_char: u8;
@@ -470,7 +470,7 @@ unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
                     break;
                 }
 
-                string::append(file_pattern_buffer, 0x518AA8 as *mut u8);
+                string::append_hooked(file_pattern_buffer, 0x518AA8 as *mut u8);
             }
 
             *file_pattern_buffer = current_char;

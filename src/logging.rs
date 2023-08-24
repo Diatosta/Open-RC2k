@@ -17,11 +17,14 @@ pub fn inject_hooks() {
     let set_writing_log_parameters_hk_addr =
         set_writing_log_parameters as *const () as lm_address_t;
     let log_type_1_parameters_hk_addr = log_type_1_parameters as *const () as lm_address_t;
-    let sub_40204a_params_hk_addr = sub_40204a_parameters as *const () as lm_address_t;
+    let log_type_2_parameters_hk_addr = log_type_2_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x40130A, set_writing_log_parameters_hk_addr).unwrap();
     let _ = LM_HookCode(0x4013CB, log_type_1_parameters_hk_addr).unwrap();
-    let _ = LM_HookCode(0x40204A, sub_40204a_params_hk_addr).unwrap();
+
+    // TODO: Unfortunately log_type_2, 3, 4 and 5 get overlapped by the hook function
+    // So we'll only be able to hook them after every call to them is replaced
+    //let _ = LM_HookCode(0x401472, log_type_2_parameters_hk_addr).unwrap();
 }
 
 #[naked]
@@ -86,49 +89,60 @@ unsafe fn log_type_1(file_buffer_ptr: *mut u8, log_level: u8, finished: bool) ->
 #[naked]
 unsafe extern "C" fn log_type_2_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push edx", "push edi", "push ecx", "push edi", "movzx ecx, dh", "movzx edi, dl", "push edi", "push ecx", "add esp, 8", "pop ecx", "pop edi", "sub esp, 16", "push eax", "call {}", "add esp, 20", "pop edi", "pop edx", "mov ecx, eax", "ret", sym log_type_2, options(noreturn));
+    asm!("push edx", "push edi", "push ecx", "push eax", "movzx ecx, dh", "movzx eax, dl", "push eax", "push ecx", "add esp, 8", "pop ecx", "pop eax", "sub esp, 16", "call {}", "add esp, 16", "pop edi", "pop edx", "mov ecx, eax", "ret", sym log_type_2, options(noreturn));
 }
 
-unsafe fn log_type_2(file_buffer_ptr: *mut u8, log_level: u8, finished: bool, unk: u32) -> u32 {
+unsafe fn log_type_2(log_level: u8, finished: bool, unk: i32) -> u32 {
+    if let Some(mut file_buffer) = log_variable(unk) {
+        let result = log(&mut file_buffer, log_level, finished);
+
+        println!("Type 2: {}", file_buffer);
+
+        result
+    } else {
+        0
+    }
+}
+
+#[inline(never)]
+unsafe fn log_variable(mut eax: i32) -> Option<String> {
     let unk_byte = *(0x4E0094 as *mut u8); // Probably indicates if logging is enabled
 
     // This is required while not all references to this variable are replaced
     IS_NEW_LOG_LINE = *(0x4E00A4 as *mut bool);
 
+    let mut log_constructor_buffer = String::new();
+
     if unk_byte == 0 {
-        return 0;
+        return None;
     }
 
     set_writing_log();
 
-    let mut file_buffer =
-        String::from_utf8_lossy(PSTR::from_raw(file_buffer_ptr).as_bytes()).to_string();
+    if eax < 0 {
+        utils::string::insert_dash(&mut log_constructor_buffer);
+        eax = -eax;
+    }
 
-    let result = log(&mut file_buffer, log_level, finished);
+    // TODO: We don't seem to be able to retrieve the modified string from here, fix it
+    sub_40204a(eax as u32, 0, &mut log_constructor_buffer);
 
-    println!("Type 1: {}", file_buffer);
-
-    result
+    Some(log_constructor_buffer)
 }
-
-unsafe fn log_variable() {}
 
 // This method stores the division of a1 and a2 in a3, and returns the remainder
 // Not sure what to call it, so I left IDA's default name
+#[inline(never)]
 unsafe fn sub_402112(a1: u32, a2: u32, a3: *mut u8) -> u32 {
     *a3 += (a1 / a2) as u8;
 
     a1 % a2
 }
 
-unsafe extern "C" fn sub_40204a_parameters() {
-    // We must push and pop all registers as they are needed further on
-    asm!("push edx", "push eax", "push ecx", "push ebx", "push ecx", "push eax", "call {}", "add esp, 12", "mov ebx, eax", "pop ecx", "pop eax", "pop edx", "ret", sym sub_40204a, options(noreturn));
-}
-
 // Not sure what to call it, so I left IDA's default name
-unsafe fn sub_40204a(a1: u32, a2: u8, a3: *mut u8) -> *mut u8 {
-    let mut result_arr = [48u8; 12];
+#[inline(never)]
+unsafe fn sub_40204a(a1: u32, a2: u8, buffer: &mut String) {
+    let mut result_arr = [48u8; 11];
     let mut remainder: u32;
 
     remainder = sub_402112(a1, 1000000000, result_arr.as_ptr().add(1) as *mut u8);
@@ -142,10 +156,8 @@ unsafe fn sub_40204a(a1: u32, a2: u8, a3: *mut u8) -> *mut u8 {
     remainder = sub_402112(remainder, 10, result_arr.as_ptr().add(9) as *mut u8);
 
     result_arr[10] += remainder as u8;
-    result_arr[11] = 0;
 
     let mut index = result_arr.len() - ((a2 & 15) as usize) - 1;
-
 
     if (a2 & 16) == 0 {
         if (a2 & 32) != 0 {
@@ -183,9 +195,12 @@ unsafe fn sub_40204a(a1: u32, a2: u8, a3: *mut u8) -> *mut u8 {
         }
     }
 
-    utils::string::append(a3, result_arr[index..].as_mut_ptr())
+    let result_str = String::from_utf8_lossy(&result_arr[index..]).to_string();
+
+    utils::string::append(buffer, &result_str);
 }
 
+#[inline(never)]
 unsafe fn log(file_buffer: &mut String, log_level: u8, finished: bool) -> u32 {
     let log_file_level = *(0x4E0098 as *mut u8);
     let mut result = 0;
@@ -225,7 +240,7 @@ unsafe fn log(file_buffer: &mut String, log_level: u8, finished: bool) -> u32 {
 
         write_to_log_file(file_pattern, PCSTR(file_buffer.as_ptr()));
 
-        result = file_buffer.len() as u32;
+        result = (file_buffer.len() - 1) as u32;
     }
 
     WRITING_TO_LOG = false;

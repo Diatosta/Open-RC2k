@@ -7,6 +7,7 @@ pub fn inject_hooks() {
     let insert_space_params_hk_addr = insert_space_parameters as *const () as lm_address_t;
     let insert_tab_params_hk_addr = insert_tab_parameters as *const () as lm_address_t;
     let insert_colon_params_hk_addr = insert_colon_parameters as *const () as lm_address_t;
+    let insert_dash_params_hk_addr = insert_dash_parameters as *const () as lm_address_t;
     let append_params_hk_addr = append_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x401EDE, are_strings_equal_hk_addr).unwrap();
@@ -14,15 +15,16 @@ pub fn inject_hooks() {
     let _ = LM_HookCode(0x401F29, insert_space_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x401F2E, insert_tab_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x401F33, insert_colon_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x401F4C, insert_dash_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x401F7D, append_params_hk_addr).unwrap();
 }
 
 #[naked]
 unsafe extern "C" fn append_parameters() {
-    asm!("push ecx", "push edx", "push eax", "push ebx", "call {}", "mov ebx, eax", "add esp, 4", "pop eax", "pop edx", "pop ecx", "ret", sym append, options(noreturn));
+    asm!("push ecx", "push edx", "push eax", "push ebx", "call {}", "mov ebx, eax", "add esp, 4", "pop eax", "pop edx", "pop ecx", "ret", sym append_hooked, options(noreturn));
 }
 
-pub unsafe fn append(mut destination: *mut u8, mut source: *mut u8) -> *mut u8 {
+pub unsafe fn append_hooked(mut destination: *mut u8, mut source: *mut u8) -> *mut u8 {
     // TODO: Replace this by a more idiomatic way
     // For now we'll have to deal with raw pointers
     loop {
@@ -37,8 +39,12 @@ pub unsafe fn append(mut destination: *mut u8, mut source: *mut u8) -> *mut u8 {
         source = source.add(1);
         destination = destination.add(1);
     }
-    
+
     destination
+}
+
+pub unsafe fn append(destination: &mut String, source: &str) {
+    destination.push_str(source);
 }
 
 #[naked]
@@ -105,6 +111,23 @@ unsafe fn insert_colon(string: *mut u8) {
 
     // Move pointer 1 forward so we don't overwrite later
     asm!("add ebx, 1");
+}
+
+#[naked]
+unsafe extern "C" fn insert_dash_parameters() {
+    asm!("push ebx", "call {}", "add esp, 4", "ret", sym insert_dash_hooked, options(noreturn));
+}
+
+// This method supposes the passed pointer points to the end of the string
+pub unsafe fn insert_dash_hooked(string: *mut u8) {
+    *string = b'-';
+
+    // Move pointer 1 forward so we don't overwrite later
+    asm!("add ebx, 1");
+}
+
+pub unsafe fn insert_dash(string: &mut String) {
+    string.push('-');
 }
 
 // This method is used to check if the game is installed to the correct folder (among possibly other things)
