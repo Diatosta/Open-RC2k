@@ -1,7 +1,7 @@
 use libmem::*;
 use std::{
     arch::asm,
-    ffi::{c_char, CStr, c_void},
+    ffi::{c_char, c_void, CStr},
 };
 use windows::{
     core::PCSTR,
@@ -10,7 +10,7 @@ use windows::{
         Storage::FileSystem::{
             CreateFileA, FindClose, FindFirstFileA, FindNextFileA, SetFilePointer,
             FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_CREATION_DISPOSITION,
-            FILE_SHARE_MODE, SET_FILE_POINTER_MOVE_METHOD, WIN32_FIND_DATAA,
+            FILE_SHARE_MODE, SET_FILE_POINTER_MOVE_METHOD, WIN32_FIND_DATAA, FILE_BEGIN,
         },
         System::{
             Environment::GetCurrentDirectoryA,
@@ -47,6 +47,7 @@ pub fn inject_hooks() {
         build_file_pattern_parameters as *const () as lm_address_t;
     let write_file_params_hk_addr = write_file_parameters as *const () as lm_address_t;
     let close_file_params_hk_addr = close_file_parameters as *const () as lm_address_t;
+    let load_file_params_hk_addr = load_file_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
     let _ = LM_HookCode(0x4030D1, get_current_directory_params_hk_addr).unwrap();
@@ -65,6 +66,7 @@ pub fn inject_hooks() {
     let _ = LM_HookCode(0x403206, build_file_pattern_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402E57, write_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x402BB6, load_file_params_hk_addr).unwrap();
 }
 
 #[naked]
@@ -368,9 +370,9 @@ unsafe extern "C" fn open_or_create_file_parameters() {
     asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "lea ebx, [eax + 1]", "cmp ebx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file, options(noreturn));
 }
 
-pub unsafe fn open_or_create_file(a1: *mut u8, a2: u32) -> HANDLE {
+pub unsafe fn open_or_create_file(file_pattern: *mut u8, a2: u32) -> HANDLE {
     // TODO: Replace this by a global to current_file_pattern
-    let current_file_pattern = build_file_pattern(a1);
+    let current_file_pattern = build_file_pattern(file_pattern);
 
     *(0x4F52B0 as *mut *mut u8) = current_file_pattern;
 
@@ -403,13 +405,12 @@ unsafe extern "C" fn set_file_pointer_parameters() {
 }
 
 // TODO: Should return a Result, not a u32
-pub unsafe fn set_file_pointer(distance_to_move: i32, file_handle: HANDLE, dw_move_method: SET_FILE_POINTER_MOVE_METHOD) -> u32 {
-    SetFilePointer(
-        file_handle,
-        distance_to_move,
-        None,
-        dw_move_method,
-    )
+pub unsafe fn set_file_pointer(
+    distance_to_move: i32,
+    file_handle: HANDLE,
+    dw_move_method: SET_FILE_POINTER_MOVE_METHOD,
+) -> u32 {
+    SetFilePointer(file_handle, distance_to_move, None, dw_move_method)
 }
 
 #[naked]
@@ -485,4 +486,31 @@ unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
     }
 
     string
+}
+
+#[naked]
+unsafe extern "C" fn load_file_parameters() {
+    asm!("push ebx", "push edx", "push ecx", "push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "pop ecx", "pop edx", "pop ebx", "ret", sym load_file_hooked, options(noreturn));
+}
+
+unsafe fn load_file_hooked(file_pattern: *mut u8, number_of_bytes_to_read: u32, unk: i32, file_buffer: *mut c_void) -> u32 {
+    let file_handle = open_or_create_file(file_pattern, 0);
+    if file_handle == INVALID_HANDLE_VALUE {
+        return 0;
+    }
+
+    if unk != 0 {
+        let result = set_file_pointer(unk, file_handle, FILE_BEGIN);
+
+        if result != 0 {
+            close_file(file_handle);
+            return 0;
+        }
+    }
+
+    let (number_of_bytes_read, _) = read_file(number_of_bytes_to_read, file_handle, file_buffer);
+
+    close_file(file_handle);
+
+    number_of_bytes_read
 }
