@@ -9,8 +9,8 @@ use windows::{
         Foundation::{CloseHandle, BOOL, HANDLE, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
             CreateFileA, FindClose, FindFirstFileA, FindNextFileA, SetFilePointer,
-            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_CREATION_DISPOSITION,
-            FILE_SHARE_MODE, SET_FILE_POINTER_MOVE_METHOD, WIN32_FIND_DATAA, FILE_BEGIN,
+            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_CREATION_DISPOSITION,
+            FILE_SHARE_MODE, SET_FILE_POINTER_MOVE_METHOD, WIN32_FIND_DATAA,
         },
         System::{
             Environment::GetCurrentDirectoryA,
@@ -48,6 +48,8 @@ pub fn inject_hooks() {
     let write_file_params_hk_addr = write_file_parameters as *const () as lm_address_t;
     let close_file_params_hk_addr = close_file_parameters as *const () as lm_address_t;
     let load_file_params_hk_addr = load_file_parameters as *const () as lm_address_t;
+    let load_file_append_terminator_params_hk_addr =
+        load_file_append_terminator_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
     let _ = LM_HookCode(0x4030D1, get_current_directory_params_hk_addr).unwrap();
@@ -67,6 +69,10 @@ pub fn inject_hooks() {
     let _ = LM_HookCode(0x402E57, write_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402BB6, load_file_params_hk_addr).unwrap();
+    let _ = LM_HookCode(
+        0x41155A,
+        load_file_append_terminator_params_hk_addr,
+    );
 }
 
 #[naked]
@@ -493,14 +499,19 @@ unsafe extern "C" fn load_file_parameters() {
     asm!("push ebx", "push edx", "push ecx", "push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "pop ecx", "pop edx", "pop ebx", "ret", sym load_file_hooked, options(noreturn));
 }
 
-unsafe fn load_file_hooked(file_pattern: *mut u8, number_of_bytes_to_read: u32, unk: i32, file_buffer: *mut c_void) -> u32 {
+unsafe fn load_file_hooked(
+    file_pattern: *mut u8,
+    number_of_bytes_to_read: u32,
+    distance_to_offset: i32,
+    file_buffer: *mut c_void,
+) -> u32 {
     let file_handle = open_or_create_file(file_pattern, 0);
     if file_handle == INVALID_HANDLE_VALUE {
         return 0;
     }
 
-    if unk != 0 {
-        let result = set_file_pointer(unk, file_handle, FILE_BEGIN);
+    if distance_to_offset != 0 {
+        let result = set_file_pointer(distance_to_offset, file_handle, FILE_BEGIN);
 
         if result != 0 {
             close_file(file_handle);
@@ -513,4 +524,23 @@ unsafe fn load_file_hooked(file_pattern: *mut u8, number_of_bytes_to_read: u32, 
     close_file(file_handle);
 
     number_of_bytes_read
+}
+
+#[naked]
+unsafe extern "C" fn load_file_append_terminator_parameters() {
+    asm!("push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "ret", sym load_file_append_terminator_hooked, options(noreturn));
+}
+
+unsafe fn load_file_append_terminator_hooked(
+    file_pattern: *mut u8,
+) -> u32 {
+    let file_buffer = 0x93E8B0 as *mut c_void;
+
+    let result = load_file_hooked(file_pattern, 0xFFFF, 0, file_buffer);
+
+    if result != 0 {
+        *(file_buffer.add(result as usize) as *mut u8) = 0;
+    }
+
+    result
 }
