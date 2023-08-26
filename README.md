@@ -6,6 +6,9 @@ Drop both libmem.dll file and the compiled dinput.dll to the game folder, next t
 
 Libmem.dll can be obtained from [here](https://github.com/rdbo/libmem/releases/tag/4.0.0) (Download libmem-win-x86.zip, the DLL will be located in `\lib\libmem.dll`)
 
+# Issues
+That I know of, the game should run as if it was stock. Only difference that should be noticeable is a console that pops up when the game opens.
+
 # How to compile
 - Install Rust from [here](https://www.rust-lang.org/tools/install).
   - When installing, select option 1 (to install through the VS Community Installer)
