@@ -50,6 +50,7 @@ pub fn inject_hooks() {
     let load_file_params_hk_addr = load_file_parameters as *const () as lm_address_t;
     let load_file_append_terminator_params_hk_addr =
         load_file_append_terminator_parameters as *const () as lm_address_t;
+    let parse_entry_params_hk_addr = parse_entry_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
     let _ = LM_HookCode(0x4030D1, get_current_directory_params_hk_addr).unwrap();
@@ -73,6 +74,7 @@ pub fn inject_hooks() {
         0x41155A,
         load_file_append_terminator_params_hk_addr,
     );
+    let _ = LM_HookCode(0x41157D, parse_entry_params_hk_addr).unwrap();
 }
 
 #[naked]
@@ -543,4 +545,110 @@ unsafe fn load_file_append_terminator_hooked(
     }
 
     result
+}
+
+#[naked]
+unsafe extern "C" fn parse_entry_parameters() {
+    asm!("push esi", "push eax", "call {}", "add esp, 8", "cmp eax, 1", "ret", sym parse_entry_hooked, options(noreturn));
+}
+
+unsafe fn parse_entry_hooked(
+    internal_list: *mut u8,
+    file_list: *mut u8,
+) -> *mut u8 {
+    let mut file_offset = 0;
+    let mut internal_offset = 0;
+    let mut current_file_char: u8;
+    let mut current_internal_char: u8;
+
+    'outer: loop {
+        current_file_char = *file_list.offset(file_offset);
+        file_offset += 1;
+
+        if current_file_char == 0 {
+            return std::ptr::null_mut();
+        }
+
+        if current_file_char <= b' ' {
+            continue;
+        }
+
+        loop {
+            current_internal_char = *internal_list.offset(internal_offset);
+            internal_offset += 1;
+
+            if current_file_char != current_internal_char {
+                break;
+            }
+
+            current_file_char = *file_list.offset(file_offset);
+            file_offset += 1;
+        }
+
+        internal_offset = 0;
+
+        if current_internal_char != 0 {
+            while current_file_char != 0 {
+                if current_file_char == b'\n' {
+                    continue 'outer;
+                }
+
+                current_file_char = *file_list.offset(file_offset);
+                file_offset += 1;
+            }
+        } else if current_internal_char == b'=' {
+            loop {
+                current_file_char = *file_list.offset(file_offset);
+                file_offset += 1;
+
+                if current_file_char == 0 {
+                    break;
+                }
+
+                if current_file_char == b'\n' || current_file_char > b' ' {
+                    return file_list.offset(file_offset - 1);
+                }
+            }
+        } else {
+            if current_internal_char > b' ' {
+                while current_file_char != 0 {
+                    if current_file_char == b'\n' {
+                        continue 'outer;
+                    }
+    
+                    current_file_char = *file_list.offset(file_offset);
+                    file_offset += 1;
+                }
+            }
+
+            while current_file_char != 0 {
+                if current_file_char == b'\n' {
+                    return file_list.offset(file_offset - 1);
+                }
+
+                if current_file_char > b' ' {
+                    if current_file_char == b'=' {
+                        loop {
+                            current_file_char = *file_list.offset(file_offset);
+                            file_offset += 1;
+            
+                            if current_file_char == 0 {
+                                break;
+                            }
+            
+                            if current_file_char == b'\n' || current_file_char > b' ' {
+                                return file_list.offset(file_offset - 1);
+                            }
+                        }
+                    }
+                    return file_list.offset(file_offset - 1);
+                }
+
+                current_file_char = *file_list.offset(file_offset);
+                file_offset += 1;
+            }
+        }
+
+        return std::ptr::null_mut();
+    }
 }
