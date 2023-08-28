@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 libmem = "=4.0.0"
+lazy_static = "1.4.0"
 
 [dependencies.windows]
 version = "0.51.0"

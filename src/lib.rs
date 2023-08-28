@@ -1,8 +1,10 @@
 #![feature(naked_functions)]
+#![feature(lazy_cell)]
 
 mod filesystem;
 mod logging;
 mod utils;
+mod ral_cfg;
 
 use std::{arch::asm, mem, thread};
 

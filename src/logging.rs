@@ -81,7 +81,7 @@ unsafe fn log_type_1(file_buffer_ptr: *mut u8, log_level: u8, finished: bool) ->
 
     let result = log(&mut file_buffer, log_level, finished);
 
-    println!("Type 1: {}", file_buffer);
+    //println!("Type 1: {}", file_buffer);
 
     result
 }
@@ -96,7 +96,7 @@ unsafe fn log_type_2(log_level: u8, finished: bool, unk: i32) -> u32 {
     if let Some(mut file_buffer) = log_variable(unk) {
         let result = log(&mut file_buffer, log_level, finished);
 
-        println!("Type 2: {}", file_buffer);
+        //println!("Type 2: {}", file_buffer);
 
         result
     } else {

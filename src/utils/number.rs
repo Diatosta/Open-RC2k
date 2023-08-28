@@ -12,7 +12,8 @@ unsafe extern "C" fn parse_int_parameters() {
     asm!("push ebx", "push eax", "call {}", "add esp, 4", "pop ebx", "ret", sym parse_int_hooked, options(noreturn));
 }
 
-pub unsafe fn parse_int_hooked(string: *mut u8) -> i32 {
+#[inline(never)]
+pub unsafe fn parse_int_hooked(string: *const u8) -> i32 {
     let mut length = 0;
     let mut offset = 0;
     let mut current_char: u8;
