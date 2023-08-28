@@ -24,10 +24,7 @@ use windows::{
 };
 use windows_sys::Win32::Storage::FileSystem::ReadFile;
 
-use crate::{
-    ral_cfg::{self, RAL_CFG_PROPERTIES},
-    utils::{string, thread},
-};
+use crate::utils::{string, thread};
 
 static mut H_FIND_FILE: HANDLE = INVALID_HANDLE_VALUE;
 
@@ -53,8 +50,6 @@ pub fn inject_hooks() {
     let load_file_params_hk_addr = load_file_parameters as *const () as lm_address_t;
     let load_file_append_terminator_params_hk_addr =
         load_file_append_terminator_parameters as *const () as lm_address_t;
-    let parse_ral_cfg_entries_params_hk_addr =
-        parse_ral_cfg_entries_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
     let _ = LM_HookCode(0x4030D1, get_current_directory_params_hk_addr).unwrap();
@@ -75,7 +70,6 @@ pub fn inject_hooks() {
     let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x402BB6, load_file_params_hk_addr).unwrap();
     let _ = LM_HookCode(0x41155A, load_file_append_terminator_params_hk_addr);
-    let _ = LM_HookCode(0x4114FF, parse_ral_cfg_entries_params_hk_addr).unwrap();
 }
 
 #[naked]
@@ -544,70 +538,4 @@ unsafe fn load_file_append_terminator_hooked(file_pattern: *mut u8) -> u32 {
     }
 
     result
-}
-
-#[naked]
-unsafe extern "C" fn parse_ral_cfg_entries_parameters() {
-    asm!("pusha", "push esi", "call {}", "add esp, 4", "popa", "ret", sym parse_ral_cfg_entries_hooked, options(noreturn));
-}
-
-unsafe fn parse_ral_cfg_entries_hooked(file_buffer: *const u8) {
-    // Find length of file_buffer
-    let mut file_buffer_length = 0;
-    while *file_buffer.add(file_buffer_length) != 0 {
-        file_buffer_length += 1;
-    }
-
-    // Convert file_buffer to a String
-    let file_buffer_str =
-        std::str::from_utf8_unchecked(std::slice::from_raw_parts(file_buffer, file_buffer_length));
-
-    let file_lines = file_buffer_str.lines();
-
-    let mut properties = match RAL_CFG_PROPERTIES.try_lock() {
-        Ok(properties) => properties,
-        Err(e) => {
-            println!("Failed to lock RAL_CFG_PROPERTIES: {}", e);
-            return;
-        }
-    };
-
-    for line in file_lines {
-        let (key, value) = match line.trim().split_once('=') {
-            Some((key, value)) => (key, value),
-            None => {
-                println!("Invalid line in RAL.CFG: {}", line);
-                continue;
-            }
-        };
-
-        let value_parsed = match value.parse::<i32>() {
-            Ok(value_parsed) => value_parsed,
-            Err(_) => {
-                // Try to parse the value as a hexadecimal number
-                let value_without_prefix = value.trim_start_matches("0x");
-                match i32::from_str_radix(value_without_prefix, 16) {
-                    Ok(value_parsed) => value_parsed,
-                    Err(_) => {
-                        println!("Invalid value in RAL.CFG: {}", line);
-                        continue;
-                    }
-                }
-            }
-        };
-
-        let property_address = match ral_cfg::RalCfgProperties::get_address(key) {
-            Ok(property_address) => property_address,
-            Err(_) => {
-                println!("Invalid key in RAL.CFG: {}", line);
-                continue;
-            }
-        };
-
-        *(property_address as *mut i32) = value_parsed;
-
-        properties.set_property(key, value_parsed);
-    }
-
-    println!("Loaded RAL.CFG properties: {:?}", properties);
 }

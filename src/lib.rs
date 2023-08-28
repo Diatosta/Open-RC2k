@@ -4,7 +4,7 @@
 mod filesystem;
 mod logging;
 mod utils;
-mod ral_cfg;
+mod config;
 
 use std::{arch::asm, mem, thread};
 
@@ -23,6 +23,7 @@ pub fn inject_hooks() {
     filesystem::inject_hooks();
     logging::inject_hooks();
     utils::inject_hooks();
+    config::inject_hooks();
 }
 
 #[naked]
