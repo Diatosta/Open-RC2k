@@ -9,6 +9,7 @@ use windows::{
 };
 
 use crate::{filesystem, utils};
+use crate::config::ral_cfg::RAL_CFG_PROPERTIES;
 
 static mut WRITING_TO_LOG: bool = false;
 static mut IS_NEW_LOG_LINE: bool = false;
@@ -202,10 +203,17 @@ unsafe fn sub_40204a(a1: u32, a2: u8, buffer: &mut String) {
 
 #[inline(never)]
 unsafe fn log(file_buffer: &mut String, log_level: u8, finished: bool) -> u32 {
-    let log_file_level = *(0x4E0098 as *mut u8);
     let mut result = 0;
 
-    if log_file_level > log_level {
+    let properties = match RAL_CFG_PROPERTIES.try_lock() {
+        Ok(properties) => properties,
+        Err(e) => {
+            println!("Failed to lock RAL_CFG_PROPERTIES to log: {}", e);
+            return result;
+        }
+    };
+
+    if properties.log_file > log_level as i32 {
         if IS_NEW_LOG_LINE {
             // Add spaces to the beginning of the line
             IS_NEW_LOG_LINE = false;
