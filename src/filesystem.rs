@@ -11,7 +11,8 @@ use windows::{
         Storage::FileSystem::{
             CreateFileA, FindClose, FindFirstFileA, FindNextFileA, SetFilePointer,
             FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_CREATION_DISPOSITION,
-            FILE_SHARE_MODE, SET_FILE_POINTER_MOVE_METHOD, WIN32_FIND_DATAA,
+            FILE_SHARE_MODE, INVALID_SET_FILE_POINTER, SET_FILE_POINTER_MOVE_METHOD,
+            WIN32_FIND_DATAA,
         },
         System::{
             Environment::GetCurrentDirectoryA,
@@ -22,7 +23,6 @@ use windows::{
         },
     },
 };
-use windows_sys::Win32::Storage::FileSystem::ReadFile;
 
 use crate::utils::{string, thread};
 
@@ -278,17 +278,17 @@ unsafe extern "C" fn read_file_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
     // We must also restore ECX and EDX as they are needed further on
-    asm!("push edx", "push ebx", "push eax", "push ecx", "call {}", "pop ecx", "add esp, 8", "cmp edx, 1", "pop edx", "ret", sym read_file, options(noreturn));
+    asm!("push edx", "push ebx", "push eax", "push ecx", "call {}", "pop ecx", "add esp, 8", "cmp edx, 1", "pop edx", "ret", sym read_file_hooked, options(noreturn));
 }
 
-unsafe fn read_file(
+unsafe fn read_file_hooked(
     number_of_bytes_to_read: u32,
     h_file: HANDLE,
     file_buffer: *mut c_void,
 ) -> (u32, u32) {
     let mut number_of_bytes_read: u32 = 0;
 
-    let result = ReadFile(
+    let result = windows_sys::Win32::Storage::FileSystem::ReadFile(
         h_file.0,
         file_buffer,
         number_of_bytes_to_read,
@@ -297,6 +297,19 @@ unsafe fn read_file(
     );
 
     (number_of_bytes_read, result as u32)
+}
+
+unsafe fn read_file(h_file: HANDLE, file_buffer: &mut [u8]) -> Result<u32, windows::core::Error> {
+    let mut number_of_bytes_read: u32 = 0;
+
+    windows::Win32::Storage::FileSystem::ReadFile(
+        h_file,
+        Some(file_buffer),
+        Some(&mut number_of_bytes_read as *mut u32),
+        Some(std::ptr::null_mut()),
+    )?;
+
+    Ok(number_of_bytes_read)
 }
 
 #[naked]
@@ -370,12 +383,12 @@ pub unsafe fn close_file(file_handle: HANDLE) -> u32 {
 
 #[naked]
 unsafe extern "C" fn open_or_create_file_parameters() {
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "lea ebx, [eax + 1]", "cmp ebx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file, options(noreturn));
+    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "lea ebx, [eax + 1]", "cmp ebx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file_hooked, options(noreturn));
 }
 
-pub unsafe fn open_or_create_file(file_pattern: *mut u8, a2: u32) -> HANDLE {
+pub unsafe fn open_or_create_file_hooked(file_pattern: *mut u8, a2: u32) -> HANDLE {
     // TODO: Replace this by a global to current_file_pattern
-    let current_file_pattern = build_file_pattern(file_pattern);
+    let current_file_pattern = build_file_pattern_hooked(file_pattern);
 
     *(0x4F52B0 as *mut *mut u8) = current_file_pattern;
 
@@ -402,13 +415,33 @@ pub unsafe fn open_or_create_file(file_pattern: *mut u8, a2: u32) -> HANDLE {
     }
 }
 
-#[naked]
-unsafe extern "C" fn set_file_pointer_parameters() {
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "lea edx, [eax + 1]", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym set_file_pointer, options(noreturn));
+pub unsafe fn open_or_create_file(
+    file_pattern: &str,
+    a2: u32,
+) -> Result<HANDLE, windows::core::Error> {
+    let current_file_pattern = build_file_pattern(file_pattern);
+
+    let dw_desired_access = *((0x4E06EA as *mut u32).add(4 * a2 as usize));
+    let dw_share_mode = *((0x4E06F2 as *mut u32).add(4 * a2 as usize));
+    let dw_creation_disposition = *((0x4E06EE as *mut u32).add(4 * a2 as usize));
+
+    CreateFileA(
+        PCSTR(current_file_pattern.as_ptr()),
+        dw_desired_access,
+        FILE_SHARE_MODE(dw_share_mode),
+        None,
+        FILE_CREATION_DISPOSITION(dw_creation_disposition),
+        FILE_ATTRIBUTE_NORMAL,
+        None,
+    )
 }
 
-// TODO: Should return a Result, not a u32
-pub unsafe fn set_file_pointer(
+#[naked]
+unsafe extern "C" fn set_file_pointer_parameters() {
+    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "lea edx, [eax + 1]", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym set_file_pointer_hooked, options(noreturn));
+}
+
+pub unsafe fn set_file_pointer_hooked(
     distance_to_move: i32,
     file_handle: HANDLE,
     dw_move_method: SET_FILE_POINTER_MOVE_METHOD,
@@ -416,12 +449,26 @@ pub unsafe fn set_file_pointer(
     SetFilePointer(file_handle, distance_to_move, None, dw_move_method)
 }
 
-#[naked]
-unsafe extern "C" fn build_file_pattern_parameters() {
-    asm!("push ecx", "push edx", "push esi", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "ret", sym build_file_pattern, options(noreturn));
+pub unsafe fn set_file_pointer(
+    distance_to_move: i32,
+    file_handle: HANDLE,
+    dw_move_method: SET_FILE_POINTER_MOVE_METHOD,
+) -> Result<u32, windows::core::Error> {
+    let result = SetFilePointer(file_handle, distance_to_move, None, dw_move_method);
+
+    if result == INVALID_SET_FILE_POINTER {
+        Err(windows::core::Error::from_win32())
+    } else {
+        Ok(result)
+    }
 }
 
-unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
+#[naked]
+unsafe extern "C" fn build_file_pattern_parameters() {
+    asm!("push ecx", "push edx", "push esi", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "ret", sym build_file_pattern_hooked, options(noreturn));
+}
+
+unsafe fn build_file_pattern_hooked(string: *mut u8) -> *mut u8 {
     let first_dword = std::str::from_utf8(&*(string as *mut [u8; 4]));
     let first_word = std::str::from_utf8(&*(string as *mut [u8; 2]));
     let first_char = std::str::from_utf8(&*(string as *mut [u8; 1]));
@@ -491,6 +538,76 @@ unsafe fn build_file_pattern(string: *mut u8) -> *mut u8 {
     string
 }
 
+unsafe fn build_file_pattern(string: &str) -> String {
+    // TODO: Replace this by a global to 5189A4
+    let unk_byte = *(0x5189A4 as *mut u8);
+
+    if string.starts_with("var\\")
+        || string.starts_with("save")
+        || string.chars().nth(1) == Some(':')
+    {
+        return format!("{}\0", string);
+    }
+
+    // TODO: Make this a &str when possible
+    let mut edx: *mut u8 ;
+
+    if !string.starts_with(";4") && unk_byte <= 3 && !string.starts_with(";3") && unk_byte >= 2 {
+        // TOOD: Replace this by a global to 5295B4
+        edx = 0x5295B4 as *mut u8;
+    } else {
+        // TOOD: Replace this by a global to 5189A8
+        edx = 0x5189A8 as *mut u8;
+    }
+
+    let source_str: *const u8 = if string.starts_with(';') {
+        string.as_ptr().add(2)
+    } else {
+        string.as_ptr()
+    };
+
+    // TODO: Replace this by a String when possible
+    let mut file_pattern_buffer = 0x94E9B0 as *mut u8;
+
+    let thread_offset = thread::get_thread_offset();
+    if thread_offset != 0 {
+        file_pattern_buffer = (thread_offset + 16) as *mut u8;
+    }
+
+    let file_pattern_buffer_start = file_pattern_buffer;
+
+    string::append_hooked(file_pattern_buffer, source_str);
+
+    loop {
+        let mut current_char: u8;
+
+        loop {
+            current_char = *edx;
+            edx = edx.add(1);
+
+            if current_char != 0x25
+            /* '%' */
+            {
+                break;
+            }
+
+            string::append_hooked(file_pattern_buffer, 0x518AA8 as *mut u8);
+        }
+
+        *file_pattern_buffer = current_char;
+        file_pattern_buffer = file_pattern_buffer.add(1);
+
+        if current_char == 0 {
+            break;
+        }
+    }
+
+    format!("{}\0", String::from_utf8_lossy(std::slice::from_raw_parts(
+        file_pattern_buffer_start,
+        file_pattern_buffer as usize - file_pattern_buffer_start as usize,
+    )))
+}
+
 #[naked]
 unsafe extern "C" fn load_file_parameters() {
     asm!("push ebx", "push edx", "push ecx", "push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "pop ecx", "pop edx", "pop ebx", "ret", sym load_file_hooked, options(noreturn));
@@ -502,13 +619,13 @@ unsafe fn load_file_hooked(
     distance_to_offset: i32,
     file_buffer: *mut c_void,
 ) -> u32 {
-    let file_handle = open_or_create_file(file_pattern, 0);
+    let file_handle = open_or_create_file_hooked(file_pattern, 0);
     if file_handle == INVALID_HANDLE_VALUE {
         return 0;
     }
 
     if distance_to_offset != 0 {
-        let result = set_file_pointer(distance_to_offset, file_handle, FILE_BEGIN);
+        let result = set_file_pointer_hooked(distance_to_offset, file_handle, FILE_BEGIN);
 
         if result != 0 {
             close_file(file_handle);
@@ -516,11 +633,36 @@ unsafe fn load_file_hooked(
         }
     }
 
-    let (number_of_bytes_read, _) = read_file(number_of_bytes_to_read, file_handle, file_buffer);
+    let (number_of_bytes_read, _) =
+        read_file_hooked(number_of_bytes_to_read, file_handle, file_buffer);
 
     close_file(file_handle);
 
     number_of_bytes_read
+}
+
+unsafe fn load_file(
+    file_pattern: &str,
+    number_of_bytes_to_read: u32,
+    distance_to_offset: i32,
+) -> Result<(Vec<u8>, u32), windows::core::Error> {
+    let file_handle = open_or_create_file(file_pattern, 0)?;
+
+    if distance_to_offset != 0 {
+        if let Err(e) = set_file_pointer(distance_to_offset, file_handle, FILE_BEGIN) {
+            close_file(file_handle);
+            return Err(e);
+        };
+    }
+
+    let mut file_buffer = vec![0u8; number_of_bytes_to_read as usize];
+
+    if let Ok(number_of_bytes_read) = read_file(file_handle, &mut file_buffer) {
+        close_file(file_handle);
+        Ok((file_buffer, number_of_bytes_read))
+    } else {
+        Err(windows::core::Error::from_win32())
+    }
 }
 
 #[naked]
@@ -538,4 +680,10 @@ unsafe fn load_file_append_terminator_hooked(file_pattern: *mut u8) -> u32 {
     }
 
     result
+}
+
+pub unsafe fn load_file_plaintext(file_pattern: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let (file_buffer, number_of_bytes_read) = load_file(file_pattern, 0xFFFF, 0)?;
+
+    Ok(String::from_utf8_lossy(&file_buffer[..number_of_bytes_read as usize]).to_string())
 }

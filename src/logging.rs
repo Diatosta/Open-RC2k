@@ -46,12 +46,12 @@ unsafe fn set_writing_log() {
 }
 
 unsafe fn write_to_log_file(file_pattern: PSTR, file_buffer: PCSTR) {
-    let file_handle = filesystem::open_or_create_file(file_pattern.as_ptr(), 4);
+    let file_handle = filesystem::open_or_create_file_hooked(file_pattern.as_ptr(), 4);
     if file_handle == INVALID_HANDLE_VALUE {
         return;
     }
 
-    if filesystem::set_file_pointer(0, file_handle, FILE_END) != INVALID_SET_FILE_POINTER {
+    if filesystem::set_file_pointer_hooked(0, file_handle, FILE_END) != INVALID_SET_FILE_POINTER {
         let _ = filesystem::write_file(file_handle, file_buffer);
     }
 

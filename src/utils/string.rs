@@ -24,7 +24,7 @@ unsafe extern "C" fn append_parameters() {
     asm!("push ecx", "push edx", "push eax", "push ebx", "call {}", "mov ebx, eax", "add esp, 4", "pop eax", "pop edx", "pop ecx", "ret", sym append_hooked, options(noreturn));
 }
 
-pub unsafe fn append_hooked(mut destination: *mut u8, mut source: *mut u8) -> *mut u8 {
+pub unsafe fn append_hooked(mut destination: *mut u8, mut source: *const u8) -> *mut u8 {
     // TODO: Replace this by a more idiomatic way
     // For now we'll have to deal with raw pointers
     loop {

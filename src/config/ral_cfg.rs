@@ -2,6 +2,8 @@ use std::{sync::{LazyLock, Mutex}, arch::asm};
 
 use libmem::{lm_address_t, LM_HookCode};
 
+use crate::filesystem;
+
 pub static RAL_CFG_PROPERTIES: LazyLock<Mutex<RalCfgProperties>> = LazyLock::new(|| Mutex::new(RalCfgProperties::new()));
 
 #[derive(Default, Debug)]
@@ -258,29 +260,13 @@ impl RalCfgProperties {
 }
 
 pub fn inject_hooks() {
-    let parse_ral_cfg_entries_params_hk_addr =
-        parse_ral_cfg_entries_parameters as *const () as lm_address_t;
+    let load_ral_cfg_entries_parameters_hk_addr = load_ral_cfg_entries_parameters as *const () as lm_address_t;
 
-    let _ = LM_HookCode(0x4114FF, parse_ral_cfg_entries_params_hk_addr).unwrap();
+    let _ = LM_HookCode(0x4114A6, load_ral_cfg_entries_parameters_hk_addr).unwrap();
 }
 
-#[naked]
-unsafe extern "C" fn parse_ral_cfg_entries_parameters() {
-    asm!("pusha", "push esi", "call {}", "add esp, 4", "popa", "ret", sym parse_ral_cfg_entries_hooked, options(noreturn));
-}
-
-unsafe fn parse_ral_cfg_entries_hooked(file_buffer: *const u8) {
-    // Find length of file_buffer
-    let mut file_buffer_length = 0;
-    while *file_buffer.add(file_buffer_length) != 0 {
-        file_buffer_length += 1;
-    }
-
-    // Convert file_buffer to a String
-    let file_buffer_str =
-        std::str::from_utf8_unchecked(std::slice::from_raw_parts(file_buffer, file_buffer_length));
-
-    let file_lines = file_buffer_str.lines();
+unsafe fn parse_ral_cfg_entries(file_buffer: &str) {
+    let file_lines = file_buffer.lines();
 
     let mut properties = match RAL_CFG_PROPERTIES.try_lock() {
         Ok(properties) => properties,
@@ -328,4 +314,23 @@ unsafe fn parse_ral_cfg_entries_hooked(file_buffer: *const u8) {
     }
 
     println!("Loaded RAL.CFG properties: {:?}", properties);
+}
+
+#[naked]
+unsafe extern "C" fn load_ral_cfg_entries_parameters() {
+    asm!("pusha", "call {}", "popa", "ret", sym load_ral_cfg_hooked, options(noreturn));
+}
+
+unsafe fn load_ral_cfg_hooked() {
+    let ral_cfg_file_name = "var\\ral.cfg";
+
+    let ral_cfg_file = match filesystem::load_file_plaintext(ral_cfg_file_name) {
+        Ok(ral_cfg_file) => ral_cfg_file,
+        Err(e) => {
+            println!("Failed to load RAL.CFG: {}", e);
+            return;
+        }
+    };
+
+    parse_ral_cfg_entries(&ral_cfg_file)
 }
