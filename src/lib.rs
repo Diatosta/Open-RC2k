@@ -6,7 +6,7 @@ mod logging;
 mod utils;
 mod config;
 
-use std::{arch::asm, mem, thread};
+use std::{arch::asm, mem};
 
 use windows::{
     core::PCSTR,
@@ -17,6 +17,13 @@ use windows::{
             LibraryLoader::{GetProcAddress, LoadLibraryA},
         },
     },
+};
+
+pub use {
+    filesystem::*,
+    logging::*,
+    utils::*,
+    config::*,
 };
 
 pub fn inject_hooks() {
@@ -61,7 +68,7 @@ unsafe fn direct_input_create_a_impl(
 extern "system" fn DllMain(_module_handle: HMODULE, dw_reason: u32, _lp_reserved: &u32) -> BOOL {
     match dw_reason {
         1u32 => {
-            thread::spawn(inject_hooks);
+            std::thread::spawn(inject_hooks);
             unsafe {
                 let _ = AllocConsole();
             }
