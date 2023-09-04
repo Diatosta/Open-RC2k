@@ -1,9 +1,10 @@
 use libmem::*;
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use std::arch::asm;
+use windows::Win32::System::Threading::GetCurrentThreadId;
 
 pub fn inject_hooks() {
-    let get_thread_offset_params_hk_addr = get_thread_offset_parameters as *const () as lm_address_t;
+    let get_thread_offset_params_hk_addr =
+        get_thread_offset_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x410CC5, get_thread_offset_params_hk_addr).unwrap();
 }

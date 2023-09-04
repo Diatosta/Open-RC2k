@@ -1,10 +1,10 @@
 #![feature(naked_functions)]
 #![feature(lazy_cell)]
 
+mod config;
 mod filesystem;
 mod logging;
 mod utils;
-mod config;
 
 use std::{arch::asm, mem};
 
@@ -19,12 +19,7 @@ use windows::{
     },
 };
 
-pub use {
-    filesystem::*,
-    logging::*,
-    utils::*,
-    config::*,
-};
+pub use {config::*, filesystem::*, logging::*, utils::*};
 
 pub fn inject_hooks() {
     filesystem::inject_hooks();

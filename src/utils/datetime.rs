@@ -11,14 +11,14 @@ pub static CURRENT_SYSTEM_TIME: LazyLock<Mutex<CurrentSystemTime>> =
 
 #[derive(Default, Debug)]
 pub struct CurrentSystemTime {
-    day_of_week: u16,
-    day: u16,
-    month: u16,
-    year: u16,
-    hour: u16,
-    minute: u16,
-    second: u16,
-    milliseconds: u16,
+    pub day_of_week: u16,
+    pub day: u16,
+    pub month: u16,
+    pub year: u16,
+    pub hour: u16,
+    pub minute: u16,
+    pub second: u16,
+    pub milliseconds: u16,
 }
 
 impl CurrentSystemTime {

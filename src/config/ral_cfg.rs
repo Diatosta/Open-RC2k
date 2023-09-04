@@ -1,11 +1,15 @@
-use std::{sync::{LazyLock, Mutex}, arch::asm};
+use std::{
+    arch::asm,
+    sync::{LazyLock, Mutex},
+};
 
 use libmem::{lm_address_t, LM_HookCode};
 
 use crate::filesystem;
 
 // TODO: This should be declared in main and passed around
-pub static RAL_CFG_PROPERTIES: LazyLock<Mutex<RalCfgProperties>> = LazyLock::new(|| Mutex::new(RalCfgProperties::new()));
+pub static RAL_CFG_PROPERTIES: LazyLock<Mutex<RalCfgProperties>> =
+    LazyLock::new(|| Mutex::new(RalCfgProperties::new()));
 
 #[derive(Default, Debug)]
 pub struct RalCfgProperties {
@@ -175,7 +179,7 @@ impl RalCfgProperties {
             _ => {}
         }
     }
-    
+
     pub fn get_address(key: &str) -> Result<usize, ()> {
         match key {
             "notaskswitch" => Ok(0x518384),
@@ -261,7 +265,8 @@ impl RalCfgProperties {
 }
 
 pub fn inject_hooks() {
-    let load_ral_cfg_entries_parameters_hk_addr = load_ral_cfg_entries_parameters as *const () as lm_address_t;
+    let load_ral_cfg_entries_parameters_hk_addr =
+        load_ral_cfg_entries_parameters as *const () as lm_address_t;
 
     let _ = LM_HookCode(0x4114A6, load_ral_cfg_entries_parameters_hk_addr).unwrap();
 }

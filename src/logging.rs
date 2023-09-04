@@ -8,8 +8,8 @@ use windows::{
     },
 };
 
-use crate::{filesystem, utils};
 use crate::config::ral_cfg::RAL_CFG_PROPERTIES;
+use crate::{filesystem, utils};
 
 static mut WRITING_TO_LOG: bool = false;
 static mut IS_NEW_LOG_LINE: bool = false;

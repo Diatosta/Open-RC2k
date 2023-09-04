@@ -1,9 +1,12 @@
 use libmem::*;
 
+use std::fmt::Error;
 use std::{
     arch::asm,
     ffi::{c_char, c_void, CStr},
 };
+use windows::core::imp::GetLastError;
+use windows::Win32::Storage::FileSystem::GetVolumeInformationA;
 use windows::{
     core::PCSTR,
     Win32::{
@@ -27,6 +30,13 @@ use windows::{
 use crate::utils::{string, thread};
 
 static mut H_FIND_FILE: HANDLE = INVALID_HANDLE_VALUE;
+
+#[derive(Default, Debug)]
+pub struct VolumeInformation {
+    pub volume_name_buffer: String,
+    pub volume_serial_number: u32,
+    pub unk_f: u32,
+}
 
 pub fn inject_hooks() {
     let get_registry_game_status_hk_addr = get_registry_game_status as *const () as lm_address_t;
@@ -550,7 +560,7 @@ unsafe fn build_file_pattern(string: &str) -> String {
     }
 
     // TODO: Make this a &str when possible
-    let mut edx: *mut u8 ;
+    let mut edx: *mut u8;
 
     if !string.starts_with(";4") && unk_byte <= 3 && !string.starts_with(";3") && unk_byte >= 2 {
         // TOOD: Replace this by a global to 5295B4
@@ -602,10 +612,13 @@ unsafe fn build_file_pattern(string: &str) -> String {
         }
     }
 
-    format!("{}\0", String::from_utf8_lossy(std::slice::from_raw_parts(
-        file_pattern_buffer_start,
-        file_pattern_buffer as usize - file_pattern_buffer_start as usize,
-    )))
+    format!(
+        "{}\0",
+        String::from_utf8_lossy(std::slice::from_raw_parts(
+            file_pattern_buffer_start,
+            file_pattern_buffer as usize - file_pattern_buffer_start as usize,
+        ))
+    )
 }
 
 #[naked]
@@ -682,8 +695,37 @@ unsafe fn load_file_append_terminator_hooked(file_pattern: *mut u8) -> u32 {
     result
 }
 
-pub unsafe fn load_file_plaintext(file_pattern: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub unsafe fn load_file_plaintext(
+    file_pattern: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     let (file_buffer, number_of_bytes_read) = load_file(file_pattern, 0xFFFF, 0)?;
 
     Ok(String::from_utf8_lossy(&file_buffer[..number_of_bytes_read as usize]).to_string())
+}
+
+// TODO: Currently this method will always fail, but that's also how it works in the original code
+pub fn get_volume_information() -> Result<VolumeInformation, windows::core::Error> {
+    let mut volume_serial_number: u32 = 0;
+    let mut volume_name_buffer = [0u8; 0xC];
+
+    unsafe {
+        match GetVolumeInformationA(
+            None,
+            Some(&mut volume_name_buffer),
+            Some(&mut volume_serial_number as *mut u32),
+            None,
+            None,
+            None,
+        ) {
+            Ok(_) => Ok(VolumeInformation {
+                volume_name_buffer: String::from_utf8_lossy(&volume_name_buffer[..]).to_string(),
+                volume_serial_number,
+                unk_f: 0,
+            }),
+            Err(e) => {
+                println!("Error GetVolumeInformationA: {}", GetLastError());
+                return Err(e);
+            }
+        }
+    }
 }
