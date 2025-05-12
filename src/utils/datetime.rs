@@ -1,6 +1,6 @@
-use libmem::*;
+use libmem::{hook_code, Address};
 use std::{
-    arch::asm,
+    arch::naked_asm,
     sync::{LazyLock, Mutex},
 };
 use windows::Win32::System::SystemInformation::GetLocalTime;
@@ -36,17 +36,17 @@ impl CurrentSystemTime {
     }
 }
 
-pub fn inject_hooks() {
+pub unsafe fn inject_hooks() { unsafe {
     let get_current_system_time_params_hk_addr =
-        get_current_system_time_parameters as *const () as lm_address_t;
+        get_current_system_time_parameters as *const () as Address;
 
-    let _ = LM_HookCode(0x410F29, get_current_system_time_params_hk_addr).unwrap();
-}
+    let _ = hook_code(0x410F29, get_current_system_time_params_hk_addr).unwrap();
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn get_current_system_time_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("pusha", "call {}", "popa", "ret", sym get_current_system_time_hooked, options(noreturn));
+    naked_asm!("pusha", "call {}", "popa", "ret", sym get_current_system_time_hooked);
 }
 
 pub fn get_current_system_time_hooked() {

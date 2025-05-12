@@ -1,5 +1,5 @@
-use libmem::*;
-use std::arch::asm;
+use libmem::{hook_code, Address};
+use std::arch::{asm, naked_asm};
 use windows::{
     core::{PCSTR, PSTR},
     Win32::{
@@ -14,28 +14,27 @@ use crate::{filesystem, utils};
 static mut WRITING_TO_LOG: bool = false;
 static mut IS_NEW_LOG_LINE: bool = false;
 
-pub fn inject_hooks() {
-    let set_writing_log_parameters_hk_addr =
-        set_writing_log_parameters as *const () as lm_address_t;
-    let log_type_1_parameters_hk_addr = log_type_1_parameters as *const () as lm_address_t;
-    let log_type_2_parameters_hk_addr = log_type_2_parameters as *const () as lm_address_t;
+pub unsafe fn inject_hooks() { unsafe {
+    let set_writing_log_parameters_hk_addr = set_writing_log_parameters as *const () as Address;
+    let log_type_1_parameters_hk_addr = log_type_1_parameters as *const () as Address;
+    let log_type_2_parameters_hk_addr = log_type_2_parameters as *const () as Address;
 
-    let _ = LM_HookCode(0x40130A, set_writing_log_parameters_hk_addr).unwrap();
-    let _ = LM_HookCode(0x4013CB, log_type_1_parameters_hk_addr).unwrap();
+    let _ = hook_code(0x40130A, set_writing_log_parameters_hk_addr).unwrap();
+    let _ = hook_code(0x4013CB, log_type_1_parameters_hk_addr).unwrap();
 
     // TODO: Unfortunately log_type_2, 3, 4 and 5 get overlapped by the hook function
     // So we'll only be able to hook them after every call to them is replaced
-    //let _ = LM_HookCode(0x401472, log_type_2_parameters_hk_addr).unwrap();
-}
+    //let _ = hook_code(0x401472, log_type_2_parameters_hk_addr).unwrap();
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn set_writing_log_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push eax", "call {}", "pop eax", "ret", sym set_writing_log, options(noreturn));
+    naked_asm!("push eax", "call {}", "pop eax", "ret", sym set_writing_log);
 }
 
 // Currently this method will always return true, as the compiler seems to think log_file is always true
-unsafe fn set_writing_log() {
+unsafe fn set_writing_log() { unsafe {
     let log_file = *(0x4E0098 as *mut bool);
 
     if log_file {
@@ -44,9 +43,9 @@ unsafe fn set_writing_log() {
         WRITING_TO_LOG = true;
         *(0x4E009C as *mut bool) = true;
     }
-}
+}}
 
-unsafe fn write_to_log_file(file_pattern: PSTR, file_buffer: PCSTR) {
+unsafe fn write_to_log_file(file_pattern: PSTR, file_buffer: PCSTR) { unsafe {
     let file_handle = filesystem::open_or_create_file_hooked(file_pattern.as_ptr(), 4);
     if file_handle == INVALID_HANDLE_VALUE {
         return;
@@ -57,15 +56,15 @@ unsafe fn write_to_log_file(file_pattern: PSTR, file_buffer: PCSTR) {
     }
 
     filesystem::close_file(file_handle);
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn log_type_1_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push edx", "push edi", "push ecx", "push edi", "movzx ecx, dh", "movzx edi, dl", "push edi", "push ecx", "add esp, 8", "pop ecx", "pop edi", "sub esp, 16", "push eax", "call {}", "add esp, 20", "pop edi", "pop edx", "mov ecx, eax", "ret", sym log_type_1, options(noreturn));
+    naked_asm!("push edx", "push edi", "push ecx", "push edi", "movzx ecx, dh", "movzx edi, dl", "push edi", "push ecx", "add esp, 8", "pop ecx", "pop edi", "sub esp, 16", "push eax", "call {}", "add esp, 20", "pop edi", "pop edx", "mov ecx, eax", "ret", sym log_type_1);
 }
 
-unsafe fn log_type_1(file_buffer_ptr: *mut u8, log_level: u8, finished: bool) -> u32 {
+unsafe fn log_type_1(file_buffer_ptr: *mut u8, log_level: u8, finished: bool) -> u32 { unsafe {
     let unk_byte = *(0x4E0094 as *mut u8); // Probably indicates if logging is enabled
 
     // This is required while not all references to this variable are replaced
@@ -85,15 +84,15 @@ unsafe fn log_type_1(file_buffer_ptr: *mut u8, log_level: u8, finished: bool) ->
     //println!("Type 1: {}", file_buffer);
 
     result
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn log_type_2_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push edx", "push edi", "push ecx", "push eax", "movzx ecx, dh", "movzx eax, dl", "push eax", "push ecx", "add esp, 8", "pop ecx", "pop eax", "sub esp, 16", "call {}", "add esp, 16", "pop edi", "pop edx", "mov ecx, eax", "ret", sym log_type_2, options(noreturn));
+    naked_asm!("push edx", "push edi", "push ecx", "push eax", "movzx ecx, dh", "movzx eax, dl", "push eax", "push ecx", "add esp, 8", "pop ecx", "pop eax", "sub esp, 16", "call {}", "add esp, 16", "pop edi", "pop edx", "mov ecx, eax", "ret", sym log_type_2);
 }
 
-unsafe fn log_type_2(log_level: u8, finished: bool, unk: i32) -> u32 {
+unsafe fn log_type_2(log_level: u8, finished: bool, unk: i32) -> u32 { unsafe {
     if let Some(mut file_buffer) = log_variable(unk) {
         let result = log(&mut file_buffer, log_level, finished);
 
@@ -103,10 +102,10 @@ unsafe fn log_type_2(log_level: u8, finished: bool, unk: i32) -> u32 {
     } else {
         0
     }
-}
+}}
 
 #[inline(never)]
-unsafe fn log_variable(mut eax: i32) -> Option<String> {
+unsafe fn log_variable(mut eax: i32) -> Option<String> { unsafe {
     let unk_byte = *(0x4E0094 as *mut u8); // Probably indicates if logging is enabled
 
     // This is required while not all references to this variable are replaced
@@ -129,20 +128,20 @@ unsafe fn log_variable(mut eax: i32) -> Option<String> {
     sub_40204a(eax as u32, 0, &mut log_constructor_buffer);
 
     Some(log_constructor_buffer)
-}
+}}
 
 // This method stores the division of a1 and a2 in a3, and returns the remainder
 // Not sure what to call it, so I left IDA's default name
 #[inline(never)]
-unsafe fn sub_402112(a1: u32, a2: u32, a3: *mut u8) -> u32 {
+unsafe fn sub_402112(a1: u32, a2: u32, a3: *mut u8) -> u32 { unsafe {
     *a3 += (a1 / a2) as u8;
 
     a1 % a2
-}
+}}
 
 // Not sure what to call it, so I left IDA's default name
 #[inline(never)]
-unsafe fn sub_40204a(a1: u32, a2: u8, buffer: &mut String) {
+unsafe fn sub_40204a(a1: u32, a2: u8, buffer: &mut String) { unsafe {
     let mut result_arr = [48u8; 11];
     let mut remainder: u32;
 
@@ -199,10 +198,10 @@ unsafe fn sub_40204a(a1: u32, a2: u8, buffer: &mut String) {
     let result_str = String::from_utf8_lossy(&result_arr[index..]).to_string();
 
     utils::string::append(buffer, &result_str);
-}
+}}
 
 #[inline(never)]
-unsafe fn log(file_buffer: &mut String, log_level: u8, finished: bool) -> u32 {
+unsafe fn log(file_buffer: &mut String, log_level: u8, finished: bool) -> u32 { unsafe {
     let mut result = 0;
 
     let properties = match RAL_CFG_PROPERTIES.try_lock() {
@@ -255,4 +254,4 @@ unsafe fn log(file_buffer: &mut String, log_level: u8, finished: bool) -> u32 {
     *(0x4E009C as *mut bool) = false;
 
     result
-}
+}}

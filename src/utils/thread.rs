@@ -1,23 +1,22 @@
-use libmem::*;
-use std::arch::asm;
+use libmem::{hook_code, Address};
+use std::arch::{asm, naked_asm};
 use windows::Win32::System::Threading::GetCurrentThreadId;
 
-pub fn inject_hooks() {
-    let get_thread_offset_params_hk_addr =
-        get_thread_offset_parameters as *const () as lm_address_t;
+pub unsafe fn inject_hooks() { unsafe {
+    let get_thread_offset_params_hk_addr = get_thread_offset_parameters as *const () as Address;
 
-    let _ = LM_HookCode(0x410CC5, get_thread_offset_params_hk_addr).unwrap();
-}
+    let _ = hook_code(0x410CC5, get_thread_offset_params_hk_addr).unwrap();
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn get_thread_offset_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push eax", "push ecx", "push edx", "call {}", "mov esi, eax", "pop edx", "pop ecx", "pop eax", "ret", sym get_thread_offset, options(noreturn));
+    naked_asm!("push eax", "push ecx", "push edx", "call {}", "mov esi, eax", "pop edx", "pop ecx", "pop eax", "ret", sym get_thread_offset);
 }
 
 // This method seems to be used to have a different buffer for each thread
 // And seems to be prepared for a maximum of 4 threads (maybe 5)
-pub unsafe fn get_thread_offset() -> usize {
+pub unsafe fn get_thread_offset() -> usize { unsafe {
     let current_thread_id = GetCurrentThreadId();
 
     let thread_id1 = *(0x5184F8 as *mut u32);
@@ -37,4 +36,4 @@ pub unsafe fn get_thread_offset() -> usize {
     asm!("test {}, {}", in(reg) current_thread_offset, in(reg) current_thread_offset);
 
     current_thread_offset
-}
+}}

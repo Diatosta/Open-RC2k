@@ -1,9 +1,9 @@
+use libmem::{hook_code, Address};
+use std::arch::naked_asm;
 use std::{
     arch::asm,
     sync::{LazyLock, Mutex},
 };
-
-use libmem::{lm_address_t, LM_HookCode};
 
 use crate::filesystem;
 
@@ -266,12 +266,14 @@ impl RalCfgProperties {
 
 pub fn inject_hooks() {
     let load_ral_cfg_entries_parameters_hk_addr =
-        load_ral_cfg_entries_parameters as *const () as lm_address_t;
+        load_ral_cfg_entries_parameters as *const () as Address;
 
-    let _ = LM_HookCode(0x4114A6, load_ral_cfg_entries_parameters_hk_addr).unwrap();
+    unsafe {
+        let _ = hook_code(0x4114A6, load_ral_cfg_entries_parameters_hk_addr).unwrap();
+    }
 }
 
-unsafe fn parse_ral_cfg_entries(file_buffer: &str) {
+unsafe fn parse_ral_cfg_entries(file_buffer: &str) { unsafe {
     let file_lines = file_buffer.lines();
 
     let mut properties = match RAL_CFG_PROPERTIES.try_lock() {
@@ -320,14 +322,14 @@ unsafe fn parse_ral_cfg_entries(file_buffer: &str) {
     }
 
     println!("Loaded RAL.CFG properties: {:?}", properties);
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn load_ral_cfg_entries_parameters() {
-    asm!("pusha", "call {}", "popa", "ret", sym load_ral_cfg_hooked, options(noreturn));
+    naked_asm!("pushad", "call {}", "popa", "ret", sym load_ral_cfg_hooked);
 }
 
-unsafe fn load_ral_cfg_hooked() {
+unsafe fn load_ral_cfg_hooked() { unsafe {
     let ral_cfg_file_name = "var\\ral.cfg";
 
     let ral_cfg_file = match filesystem::load_file_plaintext(ral_cfg_file_name) {
@@ -339,4 +341,4 @@ unsafe fn load_ral_cfg_hooked() {
     };
 
     parse_ral_cfg_entries(&ral_cfg_file)
-}
+}}

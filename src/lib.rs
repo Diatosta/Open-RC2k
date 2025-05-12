@@ -1,38 +1,38 @@
-#![feature(naked_functions)]
-#![feature(lazy_cell)]
-
 mod config;
+mod constants;
 mod filesystem;
 mod logging;
 mod utils;
 
+use std::arch::naked_asm;
 use std::{arch::asm, mem};
-
+use windows::core::BOOL;
 use windows::{
     core::PCSTR,
     Win32::{
-        Foundation::{BOOL, HMODULE},
+        Foundation::HMODULE,
         System::{
             Console::AllocConsole,
             LibraryLoader::{GetProcAddress, LoadLibraryA},
         },
     },
 };
-
-pub use {config::*, filesystem::*, logging::*, utils::*};
+pub use {config::*, constants::*, filesystem::*, utils::*};
 
 pub fn inject_hooks() {
-    filesystem::inject_hooks();
-    logging::inject_hooks();
-    utils::inject_hooks();
-    config::inject_hooks();
+    unsafe {
+        filesystem::inject_hooks();
+        logging::inject_hooks();
+        utils::inject_hooks();
+        config::inject_hooks();
+    }
 }
 
-#[naked]
-#[no_mangle]
-unsafe extern "C" fn DirectInputCreateA() -> u32 {
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+unsafe extern "C" fn DirectInputCreateA() -> () {
     // We have to fix the stack manually, as the generated function seems to screw it up
-    asm!("call {}", "add esp, 20", "push [esp - 20]", "ret", sym direct_input_create_a_impl, options(noreturn));
+    naked_asm!("call {}", "add esp, 20", "push [esp - 20]", "ret", sym direct_input_create_a_impl);
 }
 
 unsafe fn direct_input_create_a_impl(
@@ -41,9 +41,9 @@ unsafe fn direct_input_create_a_impl(
     dw_version: usize,
     pp_direct_input_a: usize,
     p_unk_outer: usize,
-) -> u32 {
-    if let Ok(original_dll) = LoadLibraryA(PCSTR("C:\\WINDOWS\\SysWOW64\\DINPUT.dll\x00".as_ptr()))
-    {
+) -> u32 { unsafe {
+    match LoadLibraryA(PCSTR("C:\\WINDOWS\\SysWOW64\\DINPUT.dll\x00".as_ptr()))
+    { Ok(original_dll) => {
         let original_function: extern "C" fn(usize, usize, usize, usize) -> u32 = mem::transmute(
             GetProcAddress(original_dll, PCSTR("DirectInputCreateA\x00".as_ptr())),
         );
@@ -54,13 +54,17 @@ unsafe fn direct_input_create_a_impl(
         asm!("sub esp, 16");
 
         result
-    } else {
+    } _ => {
         0
-    }
-}
+    }}
+}}
 
-#[no_mangle]
-extern "system" fn DllMain(_module_handle: HMODULE, dw_reason: u32, _lp_reserved: &u32) -> BOOL {
+#[unsafe(no_mangle)]
+unsafe extern "system" fn DllMain(
+    _module_handle: HMODULE,
+    dw_reason: u32,
+    _lp_reserved: &u32,
+) -> BOOL {
     match dw_reason {
         1u32 => {
             std::thread::spawn(inject_hooks);

@@ -1,19 +1,19 @@
-use libmem::*;
-
-use std::fmt::Error;
+use crate::constants::*;
+use crate::utils::{string, thread};
+use libmem::{hook_code, write_memory, Address};
 use std::{
-    arch::asm,
-    ffi::{c_char, c_void, CStr},
+    arch::naked_asm,
+    ffi::{c_char, CStr},
 };
-use windows::core::imp::GetLastError;
+use windows::core::BOOL;
 use windows::Win32::Storage::FileSystem::GetVolumeInformationA;
 use windows::{
     core::PCSTR,
     Win32::{
-        Foundation::{CloseHandle, BOOL, HANDLE, INVALID_HANDLE_VALUE},
+        Foundation::{CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
-            CreateFileA, FindClose, FindFirstFileA, FindNextFileA, SetFilePointer,
-            FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_CREATION_DISPOSITION,
+            CreateFileA, FindClose, FindFirstFileA, FindNextFileA,
+            SetFilePointer, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_CREATION_DISPOSITION,
             FILE_SHARE_MODE, INVALID_SET_FILE_POINTER, SET_FILE_POINTER_MOVE_METHOD,
             WIN32_FIND_DATAA,
         },
@@ -27,8 +27,6 @@ use windows::{
     },
 };
 
-use crate::utils::{string, thread};
-
 static mut H_FIND_FILE: HANDLE = INVALID_HANDLE_VALUE;
 
 #[derive(Default, Debug)]
@@ -38,57 +36,54 @@ pub struct VolumeInformation {
     pub unk_f: u32,
 }
 
-pub fn inject_hooks() {
-    let get_registry_game_status_hk_addr = get_registry_game_status as *const () as lm_address_t;
+pub unsafe fn inject_hooks() { unsafe {
+    let get_registry_game_status_hk_addr = get_registry_game_status as *const () as Address;
     let get_current_directory_params_hk_addr =
-        get_current_directory_parameters as *const () as lm_address_t;
-    let find_file_params_hk_addr = find_file_parameters as *const () as lm_address_t;
-    let get_directory_path_params_hk_addr =
-        get_directory_path_parameters as *const () as lm_address_t;
-    let set_current_directory_hk_addr = set_current_directory as *const () as lm_address_t;
-    let read_file_params_hk_addr = read_file_parameters as *const () as lm_address_t;
-    let find_close_params_hk_addr = find_close_parameters as *const () as lm_address_t;
+        get_current_directory_parameters as *const () as Address;
+    let find_file_params_hk_addr = find_file_parameters as *const () as Address;
+    let get_directory_path_params_hk_addr = get_directory_path_parameters as *const () as Address;
+    let set_current_directory_hk_addr = set_current_directory as *const () as Address;
+    let read_file_params_hk_addr = read_file_parameters as *const () as Address;
+    let find_close_params_hk_addr = find_close_parameters as *const () as Address;
     let is_game_installed_in_current_directory_params_hk_addr =
-        is_game_installed_in_current_directory_parameters as *const () as lm_address_t;
-    let open_or_create_file_params_hk_addr =
-        open_or_create_file_parameters as *const () as lm_address_t;
-    let set_file_pointer_params_hk_addr = set_file_pointer_parameters as *const () as lm_address_t;
-    let build_file_pattern_params_hk_addr =
-        build_file_pattern_parameters as *const () as lm_address_t;
-    let write_file_params_hk_addr = write_file_parameters as *const () as lm_address_t;
-    let close_file_params_hk_addr = close_file_parameters as *const () as lm_address_t;
-    let load_file_params_hk_addr = load_file_parameters as *const () as lm_address_t;
+        is_game_installed_in_current_directory_parameters as *const () as Address;
+    let open_or_create_file_params_hk_addr = open_or_create_file_parameters as *const () as Address;
+    let set_file_pointer_params_hk_addr = set_file_pointer_parameters as *const () as Address;
+    let build_file_pattern_params_hk_addr = build_file_pattern_parameters as *const () as Address;
+    let write_file_params_hk_addr = write_file_parameters as *const () as Address;
+    let close_file_params_hk_addr = close_file_parameters as *const () as Address;
+    let load_file_params_hk_addr = load_file_parameters as *const () as Address;
     let load_file_append_terminator_params_hk_addr =
-        load_file_append_terminator_parameters as *const () as lm_address_t;
+        load_file_append_terminator_parameters as *const () as Address;
 
-    let _ = LM_HookCode(0x413D14, get_registry_game_status_hk_addr).unwrap();
-    let _ = LM_HookCode(0x4030D1, get_current_directory_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402FC2, find_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x403070, get_directory_path_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x403105, set_current_directory_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402E3D, read_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x40301F, find_close_params_hk_addr).unwrap();
-    let _ = LM_HookCode(
+    let _ = hook_code(0x413D14, get_registry_game_status_hk_addr).unwrap();
+    let _ = hook_code(0x4030D1, get_current_directory_params_hk_addr).unwrap();
+    let _ = hook_code(0x402FC2, find_file_params_hk_addr).unwrap();
+    let _ = hook_code(0x403070, get_directory_path_params_hk_addr).unwrap();
+    let _ = hook_code(0x403105, set_current_directory_hk_addr).unwrap();
+    let _ = hook_code(0x402E3D, read_file_params_hk_addr).unwrap();
+    let _ = hook_code(0x40301F, find_close_params_hk_addr).unwrap();
+    let _ = hook_code(
         0x412DA3,
         is_game_installed_in_current_directory_params_hk_addr,
     )
     .unwrap();
-    let _ = LM_HookCode(0x402DE8, open_or_create_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402E75, set_file_pointer_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x403206, build_file_pattern_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402E57, write_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402E23, close_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x402BB6, load_file_params_hk_addr).unwrap();
-    let _ = LM_HookCode(0x41155A, load_file_append_terminator_params_hk_addr);
-}
+    let _ = hook_code(0x402DE8, open_or_create_file_params_hk_addr).unwrap();
+    let _ = hook_code(0x402E75, set_file_pointer_params_hk_addr).unwrap();
+    let _ = hook_code(0x403206, build_file_pattern_params_hk_addr).unwrap();
+    let _ = hook_code(0x402E57, write_file_params_hk_addr).unwrap();
+    let _ = hook_code(0x402E23, close_file_params_hk_addr).unwrap();
+    let _ = hook_code(0x402BB6, load_file_params_hk_addr).unwrap();
+    let _ = hook_code(0x41155A, load_file_append_terminator_params_hk_addr);
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn is_game_installed_in_current_directory_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("pusha", "call {}", "popa", "ret", sym is_game_installed_in_current_directory, options(noreturn));
+    naked_asm!("pusha", "call {}", "popa", "ret", sym is_game_installed_in_current_directory);
 }
 
-unsafe fn is_game_installed_in_current_directory() {
+unsafe fn is_game_installed_in_current_directory() { unsafe {
     // In the original code here we'd check if the retrieved string and the registry string are equal
     // However, to have the game be portable, we'll skip this check
     // We still get the registry status and source keys though, as well as the current directory
@@ -100,16 +95,16 @@ unsafe fn is_game_installed_in_current_directory() {
     get_current_directory(&mut *game_path);
 
     string::are_strings_equal();
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn get_current_directory_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push ebx", "push ecx", "push edx", "call {}", "pop edx", "pop ecx", "pop ebx", "ret", sym get_current_directory, options(noreturn));
+    naked_asm!("push ebx", "push ecx", "push edx", "call {}", "pop edx", "pop ecx", "pop ebx", "ret", sym get_current_directory);
 }
 
 // Gets the current directory
-unsafe fn get_current_directory(directory_buffer: &mut [u8; 0xFF]) -> u32 {
+unsafe fn get_current_directory(directory_buffer: &mut [u8; 0xFF]) -> u32 { unsafe {
     let bytes_written = GetCurrentDirectoryA(Some(directory_buffer));
 
     if bytes_written != 0 {
@@ -126,10 +121,10 @@ unsafe fn get_current_directory(directory_buffer: &mut [u8; 0xFF]) -> u32 {
     }
 
     bytes_written
-}
+}}
 
 // Gets the status and source keys from the registry
-unsafe fn get_registry_game_status() {
+unsafe fn get_registry_game_status() { unsafe {
     const SOFTWARE_MAGNETIC_FIELDS: &str = "SOFTWARE\\Magnetic Fields\\RC99\x00";
     const STATUS: &str = "status\x00";
     const SOURCE: &str = "source\x00";
@@ -143,7 +138,7 @@ unsafe fn get_registry_game_status() {
     let mut result = RegOpenKeyExA(
         HKEY_LOCAL_MACHINE,
         PCSTR(SOFTWARE_MAGNETIC_FIELDS.as_ptr()),
-        0,
+        None,
         KEY_READ | KEY_WOW64_32KEY,
         &mut phk_result,
     );
@@ -188,17 +183,17 @@ unsafe fn get_registry_game_status() {
 
     // Set 0x51BB8D to registry_source (and copy all data)
     (0x51BB8D as *mut u8).copy_from(registry_source.as_mut_ptr(), 0xFF);
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn find_file_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
     // ECX and EDX are also needed further on, so we have to save it
-    asm!("push ebx", "push ecx", "push edx", "push eax", "call {}", "add esp, 4", "pop edx", "pop ecx", "pop ebx", "ret", sym find_file_impl, options(noreturn));
+    naked_asm!("push ebx", "push ecx", "push edx", "push eax", "call {}", "add esp, 4", "pop edx", "pop ecx", "pop ebx", "ret", sym find_file_impl);
 }
 
-unsafe fn find_file_impl(a1: *const u8) -> u32 {
+unsafe fn find_file_impl(a1: *const u8) -> u32 { unsafe {
     // This seems to be where the current file name is stored
     *(0x4F52B0 as *mut *const u8) = a1;
 
@@ -210,7 +205,7 @@ unsafe fn find_file_impl(a1: *const u8) -> u32 {
     // This is the same as the type of the second argument of FindFirstFileA
     // Ideally this would be done with libmem, but it seems to be broken for now
     let find_file_data = 0x4E05A8 as *mut WIN32_FIND_DATAA;
-    if let Ok(find_first_file_result) = FindFirstFileA(lp_filename, find_file_data) {
+    match FindFirstFileA(lp_filename, find_file_data) { Ok(find_first_file_result) => {
         *(0x4E05A4 as *mut HANDLE) = find_first_file_result;
         //H_FIND_FILE = find_first_file_result;
 
@@ -219,16 +214,16 @@ unsafe fn find_file_impl(a1: *const u8) -> u32 {
         } else {
             result = (*find_file_data).dwFileAttributes;
         }
-    } else {
+    } _ => {
         *(0x4E05A4 as *mut HANDLE) = INVALID_HANDLE_VALUE;
         //H_FIND_FILE = INVALID_HANDLE_VALUE;
         result = 0;
-    }
+    }}
 
     result
-}
+}}
 
-unsafe fn find_next_file() -> i32 {
+unsafe fn find_next_file() -> i32 { unsafe {
     let mut result: BOOL;
     let find_file_data = 0x4E05A8 as *mut WIN32_FIND_DATAA;
     let mut unk_value: u32;
@@ -250,16 +245,16 @@ unsafe fn find_next_file() -> i32 {
     }
 
     result.0
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn get_directory_path_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
-    asm!("push eax", "push ecx", "push ebx", "push edx", "call {}", "mov ebx, eax", "pop edx", "add esp, 4", "pop ecx", "pop eax", "ret", sym get_directory_path, options(noreturn));
+    naked_asm!("push eax", "push ecx", "push ebx", "push edx", "call {}", "mov ebx, eax", "pop edx", "add esp, 4", "pop ecx", "pop eax", "ret", sym get_directory_path);
 }
 
-unsafe fn get_directory_path(a1: *const c_char, a2: *mut u8) -> usize {
+unsafe fn get_directory_path(a1: *const c_char, a2: *mut u8) -> usize { unsafe {
     // Convert a1 pointer to a &str
     let a1_str = CStr::from_ptr(a1).to_str();
 
@@ -276,26 +271,26 @@ unsafe fn get_directory_path(a1: *const c_char, a2: *mut u8) -> usize {
     }
 
     0
-}
+}}
 
 unsafe fn set_current_directory(_new_directory: PCSTR) {
     // Ignore this for now, we want to keep the current directory
     //SetCurrentDirectoryA(new_directory);
 }
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn read_file_parameters() {
     // Push the parameters to the stack
     // As the parameters are not passed as normal, and Rust can't handle it, we have to do it manually
     // We must also restore ECX and EDX as they are needed further on
-    asm!("push edx", "push ebx", "push eax", "push ecx", "call {}", "pop ecx", "add esp, 8", "cmp edx, 1", "pop edx", "ret", sym read_file_hooked, options(noreturn));
+    naked_asm!("push edx", "push ebx", "push eax", "push ecx", "call {}", "pop ecx", "add esp, 8", "cmp edx, 1", "pop edx", "ret", sym read_file_hooked);
 }
 
 unsafe fn read_file_hooked(
     number_of_bytes_to_read: u32,
     h_file: HANDLE,
-    file_buffer: *mut c_void,
-) -> (u32, u32) {
+    file_buffer: *mut u8,
+) -> (u32, u32) { unsafe {
     let mut number_of_bytes_read: u32 = 0;
 
     let result = windows_sys::Win32::Storage::FileSystem::ReadFile(
@@ -307,9 +302,9 @@ unsafe fn read_file_hooked(
     );
 
     (number_of_bytes_read, result as u32)
-}
+}}
 
-unsafe fn read_file(h_file: HANDLE, file_buffer: &mut [u8]) -> Result<u32, windows::core::Error> {
+unsafe fn read_file(h_file: HANDLE, file_buffer: &mut [u8]) -> Result<u32, windows::core::Error> { unsafe {
     let mut number_of_bytes_read: u32 = 0;
 
     windows::Win32::Storage::FileSystem::ReadFile(
@@ -320,12 +315,12 @@ unsafe fn read_file(h_file: HANDLE, file_buffer: &mut [u8]) -> Result<u32, windo
     )?;
 
     Ok(number_of_bytes_read)
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn write_file_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym write_file_hooked, options(noreturn));
+    naked_asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym write_file_hooked);
 }
 
 // TODO: This method should be removed when all hooks are implemented, using the one below instead
@@ -333,7 +328,7 @@ unsafe fn write_file_hooked(
     number_of_bytes_to_write: u32,
     file_handle: HANDLE,
     file_buffer: *const u8,
-) -> (u32, u32) {
+) -> (u32, u32) { unsafe {
     let mut number_of_bytes_written: u32 = 0;
 
     let result = windows_sys::Win32::Storage::FileSystem::WriteFile(
@@ -345,12 +340,12 @@ unsafe fn write_file_hooked(
     );
 
     (number_of_bytes_written, result as u32)
-}
+}}
 
 pub unsafe fn write_file(
     file_handle: HANDLE,
     file_buffer: PCSTR,
-) -> Result<u32, windows::core::Error> {
+) -> Result<u32, windows::core::Error> { unsafe {
     let mut number_of_bytes_written: u32 = 0;
 
     windows::Win32::Storage::FileSystem::WriteFile(
@@ -361,42 +356,42 @@ pub unsafe fn write_file(
     )?;
 
     Ok(number_of_bytes_written)
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn find_close_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("pusha", "call {}", "popa", "ret", sym find_close, options(noreturn));
+    naked_asm!("pusha", "call {}", "popa", "ret", sym find_close);
 }
 
-unsafe fn find_close() {
+unsafe fn find_close() { unsafe {
     let h_find_file = *(0x4E05A4 as *mut HANDLE);
     if h_find_file != INVALID_HANDLE_VALUE {
         let _ = FindClose(h_find_file);
         *(0x4E05A4 as *mut HANDLE) = INVALID_HANDLE_VALUE;
     }
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn close_file_parameters() {
     // We must push and pop all registers as they are needed further on
-    asm!("push ebx", "push ecx", "push edx", "push eax", "call {}", "add esp, 4", "cmp eax, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym close_file, options(noreturn));
+    naked_asm!("push ebx", "push ecx", "push edx", "push eax", "call {}", "add esp, 4", "cmp eax, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym close_file);
 }
 
-pub unsafe fn close_file(file_handle: HANDLE) -> u32 {
+pub unsafe fn close_file(file_handle: HANDLE) -> u32 { unsafe {
     *(0x4F52B0 as *mut HANDLE) = HANDLE::default();
 
     let result = CloseHandle(file_handle);
 
     result.is_ok() as u32
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn open_or_create_file_parameters() {
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "lea ebx, [eax + 1]", "cmp ebx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file_hooked, options(noreturn));
+    naked_asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "call {}", "add esp, 8", "lea ebx, [eax + 1]", "cmp ebx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym open_or_create_file_hooked);
 }
 
-pub unsafe fn open_or_create_file_hooked(file_pattern: *mut u8, a2: u32) -> HANDLE {
+pub unsafe fn open_or_create_file_hooked(file_pattern: *mut u8, a2: u32) -> HANDLE { unsafe {
     // TODO: Replace this by a global to current_file_pattern
     let current_file_pattern = build_file_pattern_hooked(file_pattern);
 
@@ -423,20 +418,22 @@ pub unsafe fn open_or_create_file_hooked(file_pattern: *mut u8, a2: u32) -> HAND
     } else {
         INVALID_HANDLE_VALUE
     }
-}
+}}
 
 pub unsafe fn open_or_create_file(
     file_pattern: &str,
     a2: u32,
-) -> Result<HANDLE, windows::core::Error> {
-    let current_file_pattern = build_file_pattern(file_pattern);
+) -> Result<HANDLE, windows::core::Error> { unsafe {
+    let current_file_pattern = build_file_pattern(file_pattern).as_ptr() as *const c_char;
 
-    let dw_desired_access = *((0x4E06EA as *mut u32).add(4 * a2 as usize));
-    let dw_share_mode = *((0x4E06F2 as *mut u32).add(4 * a2 as usize));
-    let dw_creation_disposition = *((0x4E06EE as *mut u32).add(4 * a2 as usize));
+    write_memory(FILE_PATTERN_MAYBE, &current_file_pattern);
+
+    let dw_desired_access = *((DAT_4E06EA as *mut u32).add(4 * a2 as usize));
+    let dw_share_mode = *((DAT_4E06F2 as *mut u32).add(4 * a2 as usize));
+    let dw_creation_disposition = *((DAT_4E06EE as *mut u32).add(4 * a2 as usize));
 
     CreateFileA(
-        PCSTR(current_file_pattern.as_ptr()),
+        PCSTR(current_file_pattern as *const u8),
         dw_desired_access,
         FILE_SHARE_MODE(dw_share_mode),
         None,
@@ -444,26 +441,26 @@ pub unsafe fn open_or_create_file(
         FILE_ATTRIBUTE_NORMAL,
         None,
     )
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn set_file_pointer_parameters() {
-    asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "lea edx, [eax + 1]", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym set_file_pointer_hooked, options(noreturn));
+    naked_asm!("push ebx", "push ecx", "push edx", "push ebx", "push eax", "push ecx", "call {}", "add esp, 12", "lea edx, [eax + 1]", "cmp edx, 1", "pop edx", "pop ecx", "pop ebx", "ret", sym set_file_pointer_hooked);
 }
 
 pub unsafe fn set_file_pointer_hooked(
     distance_to_move: i32,
     file_handle: HANDLE,
     dw_move_method: SET_FILE_POINTER_MOVE_METHOD,
-) -> u32 {
+) -> u32 { unsafe {
     SetFilePointer(file_handle, distance_to_move, None, dw_move_method)
-}
+}}
 
 pub unsafe fn set_file_pointer(
     distance_to_move: i32,
     file_handle: HANDLE,
     dw_move_method: SET_FILE_POINTER_MOVE_METHOD,
-) -> Result<u32, windows::core::Error> {
+) -> Result<u32, windows::core::Error> { unsafe {
     let result = SetFilePointer(file_handle, distance_to_move, None, dw_move_method);
 
     if result == INVALID_SET_FILE_POINTER {
@@ -471,14 +468,14 @@ pub unsafe fn set_file_pointer(
     } else {
         Ok(result)
     }
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn build_file_pattern_parameters() {
-    asm!("push ecx", "push edx", "push esi", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "ret", sym build_file_pattern_hooked, options(noreturn));
+    naked_asm!("push ecx", "push edx", "push esi", "push eax", "call {}", "add esp, 8", "pop edx", "pop ecx", "ret", sym build_file_pattern_hooked);
 }
 
-unsafe fn build_file_pattern_hooked(string: *mut u8) -> *mut u8 {
+unsafe fn build_file_pattern_hooked(string: *mut u8) -> *mut u8 { unsafe {
     let first_dword = std::str::from_utf8(&*(string as *mut [u8; 4]));
     let first_word = std::str::from_utf8(&*(string as *mut [u8; 2]));
     let first_char = std::str::from_utf8(&*(string as *mut [u8; 1]));
@@ -546,9 +543,9 @@ unsafe fn build_file_pattern_hooked(string: *mut u8) -> *mut u8 {
     }
 
     string
-}
+}}
 
-unsafe fn build_file_pattern(string: &str) -> String {
+unsafe fn build_file_pattern(string: &str) -> String { unsafe {
     // TODO: Replace this by a global to 5189A4
     let unk_byte = *(0x5189A4 as *mut u8);
 
@@ -619,19 +616,19 @@ unsafe fn build_file_pattern(string: &str) -> String {
             file_pattern_buffer as usize - file_pattern_buffer_start as usize,
         ))
     )
-}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn load_file_parameters() {
-    asm!("push ebx", "push edx", "push ecx", "push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "pop ecx", "pop edx", "pop ebx", "ret", sym load_file_hooked, options(noreturn));
+    naked_asm!("push ebx", "push edx", "push ecx", "push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "pop ecx", "pop edx", "pop ebx", "ret", sym load_file_hooked);
 }
 
 unsafe fn load_file_hooked(
     file_pattern: *mut u8,
     number_of_bytes_to_read: u32,
     distance_to_offset: i32,
-    file_buffer: *mut c_void,
-) -> u32 {
+    file_buffer: *mut u8,
+) -> u32 { unsafe {
     let file_handle = open_or_create_file_hooked(file_pattern, 0);
     if file_handle == INVALID_HANDLE_VALUE {
         return 0;
@@ -652,13 +649,13 @@ unsafe fn load_file_hooked(
     close_file(file_handle);
 
     number_of_bytes_read
-}
+}}
 
 unsafe fn load_file(
     file_pattern: &str,
     number_of_bytes_to_read: u32,
     distance_to_offset: i32,
-) -> Result<(Vec<u8>, u32), windows::core::Error> {
+) -> Result<(Vec<u8>, u32), windows::core::Error> { unsafe {
     let file_handle = open_or_create_file(file_pattern, 0)?;
 
     if distance_to_offset != 0 {
@@ -670,21 +667,21 @@ unsafe fn load_file(
 
     let mut file_buffer = vec![0u8; number_of_bytes_to_read as usize];
 
-    if let Ok(number_of_bytes_read) = read_file(file_handle, &mut file_buffer) {
+    match read_file(file_handle, &mut file_buffer) { Ok(number_of_bytes_read) => {
         close_file(file_handle);
         Ok((file_buffer, number_of_bytes_read))
-    } else {
+    } _ => {
         Err(windows::core::Error::from_win32())
-    }
-}
+    }}
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn load_file_append_terminator_parameters() {
-    asm!("push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "ret", sym load_file_append_terminator_hooked, options(noreturn));
+    naked_asm!("push eax", "call {}", "add esp, 4", "sub eax, 1", "inc eax", "ret", sym load_file_append_terminator_hooked);
 }
 
-unsafe fn load_file_append_terminator_hooked(file_pattern: *mut u8) -> u32 {
-    let file_buffer = 0x93E8B0 as *mut c_void;
+unsafe fn load_file_append_terminator_hooked(file_pattern: *mut u8) -> u32 { unsafe {
+    let file_buffer = 0x93E8B0 as *mut u8;
 
     let result = load_file_hooked(file_pattern, 0xFFFF, 0, file_buffer);
 
@@ -693,15 +690,15 @@ unsafe fn load_file_append_terminator_hooked(file_pattern: *mut u8) -> u32 {
     }
 
     result
-}
+}}
 
 pub unsafe fn load_file_plaintext(
     file_pattern: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error>> { unsafe {
     let (file_buffer, number_of_bytes_read) = load_file(file_pattern, 0xFFFF, 0)?;
 
     Ok(String::from_utf8_lossy(&file_buffer[..number_of_bytes_read as usize]).to_string())
-}
+}}
 
 // TODO: Currently this method will always fail, but that's also how it works in the original code
 pub fn get_volume_information() -> Result<VolumeInformation, windows::core::Error> {
@@ -723,8 +720,8 @@ pub fn get_volume_information() -> Result<VolumeInformation, windows::core::Erro
                 unk_f: 0,
             }),
             Err(e) => {
-                println!("Error GetVolumeInformationA: {}", GetLastError());
-                return Err(e);
+                println!("Error GetVolumeInformationA: {:?}", GetLastError());
+                Err(e)
             }
         }
     }

@@ -1,19 +1,19 @@
-use libmem::*;
-use std::arch::asm;
+use libmem::{hook_code, Address};
+use std::arch::{asm, naked_asm};
 
-pub fn inject_hooks() {
-    let parse_int_params_hk_addr = parse_int_parameters as *const () as lm_address_t;
+pub unsafe fn inject_hooks() { unsafe {
+    let parse_int_params_hk_addr = parse_int_parameters as *const () as Address;
 
-    let _ = LM_HookCode(0x411623, parse_int_params_hk_addr).unwrap();
-}
+    let _ = hook_code(0x411623, parse_int_params_hk_addr).unwrap();
+}}
 
-#[naked]
+#[unsafe(naked)]
 unsafe extern "C" fn parse_int_parameters() {
-    asm!("push ebx", "push eax", "call {}", "add esp, 4", "pop ebx", "ret", sym parse_int_hooked, options(noreturn));
+    naked_asm!("push ebx", "push eax", "call {}", "add esp, 4", "pop ebx", "ret", sym parse_int_hooked);
 }
 
 #[inline(never)]
-pub unsafe fn parse_int_hooked(string: *const u8) -> i32 {
+pub unsafe fn parse_int_hooked(string: *const u8) -> i32 { unsafe {
     let mut length = 0;
     let mut offset = 0;
     let mut current_char: u8;
@@ -91,4 +91,4 @@ pub unsafe fn parse_int_hooked(string: *const u8) -> i32 {
     }
 
     result
-}
+}}
