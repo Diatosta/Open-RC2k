@@ -273,72 +273,76 @@ pub fn inject_hooks() {
     }
 }
 
-unsafe fn parse_ral_cfg_entries(file_buffer: &str) { unsafe {
-    let file_lines = file_buffer.lines();
+unsafe fn parse_ral_cfg_entries(file_buffer: &str) {
+    unsafe {
+        let file_lines = file_buffer.lines();
 
-    let mut properties = match RAL_CFG_PROPERTIES.try_lock() {
-        Ok(properties) => properties,
-        Err(e) => {
-            println!("Failed to lock RAL_CFG_PROPERTIES: {}", e);
-            return;
-        }
-    };
-
-    for line in file_lines {
-        let (key, value) = match line.trim().split_once('=') {
-            Some((key, value)) => (key, value),
-            None => {
-                println!("Invalid line in RAL.CFG: {}", line);
-                continue;
+        let mut properties = match RAL_CFG_PROPERTIES.try_lock() {
+            Ok(properties) => properties,
+            Err(e) => {
+                println!("Failed to lock RAL_CFG_PROPERTIES: {}", e);
+                return;
             }
         };
 
-        let value_parsed = match value.parse::<i32>() {
-            Ok(value_parsed) => value_parsed,
-            Err(_) => {
-                // Try to parse the value as a hexadecimal number
-                let value_without_prefix = value.trim_start_matches("0x");
-                match i32::from_str_radix(value_without_prefix, 16) {
-                    Ok(value_parsed) => value_parsed,
-                    Err(_) => {
-                        println!("Invalid value in RAL.CFG: {}", line);
-                        continue;
+        for line in file_lines {
+            let (key, value) = match line.trim().split_once('=') {
+                Some((key, value)) => (key, value),
+                None => {
+                    println!("Invalid line in RAL.CFG: {}", line);
+                    continue;
+                }
+            };
+
+            let value_parsed = match value.parse::<i32>() {
+                Ok(value_parsed) => value_parsed,
+                Err(_) => {
+                    // Try to parse the value as a hexadecimal number
+                    let value_without_prefix = value.trim_start_matches("0x");
+                    match i32::from_str_radix(value_without_prefix, 16) {
+                        Ok(value_parsed) => value_parsed,
+                        Err(_) => {
+                            println!("Invalid value in RAL.CFG: {}", line);
+                            continue;
+                        }
                     }
                 }
-            }
-        };
+            };
 
-        let property_address = match RalCfgProperties::get_address(key) {
-            Ok(property_address) => property_address,
-            Err(_) => {
-                println!("Invalid key in RAL.CFG: {}", line);
-                continue;
-            }
-        };
+            let property_address = match RalCfgProperties::get_address(key) {
+                Ok(property_address) => property_address,
+                Err(_) => {
+                    println!("Invalid key in RAL.CFG: {}", line);
+                    continue;
+                }
+            };
 
-        *(property_address as *mut i32) = value_parsed;
+            *(property_address as *mut i32) = value_parsed;
 
-        properties.set_property(key, value_parsed);
+            properties.set_property(key, value_parsed);
+        }
+
+        println!("Loaded RAL.CFG properties: {:?}", properties);
     }
-
-    println!("Loaded RAL.CFG properties: {:?}", properties);
-}}
+}
 
 #[unsafe(naked)]
 unsafe extern "C" fn load_ral_cfg_entries_parameters() {
     naked_asm!("pushad", "call {}", "popa", "ret", sym load_ral_cfg_hooked);
 }
 
-unsafe fn load_ral_cfg_hooked() { unsafe {
-    let ral_cfg_file_name = "var\\ral.cfg";
+unsafe fn load_ral_cfg_hooked() {
+    unsafe {
+        let ral_cfg_file_name = "var\\ral.cfg";
 
-    let ral_cfg_file = match filesystem::load_file_plaintext(ral_cfg_file_name) {
-        Ok(ral_cfg_file) => ral_cfg_file,
-        Err(e) => {
-            println!("Failed to load RAL.CFG: {}", e);
-            return;
-        }
-    };
+        let ral_cfg_file = match filesystem::load_file_plaintext(ral_cfg_file_name) {
+            Ok(ral_cfg_file) => ral_cfg_file,
+            Err(e) => {
+                println!("Failed to load RAL.CFG: {}", e);
+                return;
+            }
+        };
 
-    parse_ral_cfg_entries(&ral_cfg_file)
-}}
+        parse_ral_cfg_entries(&ral_cfg_file)
+    }
+}
